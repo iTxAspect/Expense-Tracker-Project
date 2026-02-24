@@ -1,2 +1,0 @@
-github
-https://github.com/iTxAspect/Expense-Tracker-Project
