@@ -34,6 +34,55 @@ from datetime import datetime
 
 import logic
 
+# ── FontAwesome Icon Font ─────────────────────────────────────────────────────
+# Register FontAwesome 4 so we can use real icons via markup tags.
+# The TTF file must sit in the same folder as gui.py.
+from kivy.core.text import LabelBase
+import os as _os
+
+_FA_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                          "fontawesome-webfont.ttf")
+if _os.path.exists(_FA_PATH):
+    LabelBase.register(name="FA", fn_regular=_FA_PATH)
+    _FA_OK = True
+else:
+    _FA_OK = False
+
+def fa(codepoint, size=16, color=None):
+    """
+    Return a Kivy markup string that renders a FontAwesome icon.
+    codepoint: e.g. '\uf015'
+    Falls back to empty string if font not found.
+    """
+    if not _FA_OK:
+        return ""
+    color_tag = f"[color={color}]" if color else ""
+    color_end  = "[/color]"        if color else ""
+    return f"{color_tag}[font=FA][size={int(size)}]{codepoint}[/size][/font]{color_end}"
+
+# ── Icon Codepoints (FontAwesome 4) ──────────────────────────────────────────
+IC = {
+    "home":         "\uf015",
+    "list":         "\uf03a",
+    "plus":         "\uf067",
+    "chart":        "\uf080",
+    "cog":          "\uf013",
+    "check":        "\uf00c",
+    "times":        "\uf00d",
+    "edit":         "\uf044",
+    "trash":        "\uf1f8",
+    "save":         "\uf0c7",
+    "arrow_left":   "\uf060",
+    "arrow_right":  "\uf061",
+    "dollar":       "\uf155",
+    "calendar":     "\uf073",
+    "tag":          "\uf02b",
+    "exclamation":  "\uf071",
+    "wallet":       "\uf555",
+    "eye":          "\uf06e",
+    "money":        "\uf0d6",
+}
+
 # ── Colour Palette ────────────────────────────────────────────────────────────
 C = {
     "bg":        "#0F1117",
@@ -82,6 +131,7 @@ def make_label(text, size=14, color="text", bold=False, halign="left", **kwargs)
         color=hex_c(color),
         bold=bold,
         halign=halign,
+        markup=True,
         text_size=(None, None),
         **kwargs
     )
@@ -93,6 +143,7 @@ def make_button(text, bg=C["accent"], fg=C["white"], on_press=None,
                 height=dp(48), radius=dp(12), font_size=15, **kwargs):
     btn = Button(
         text=text,
+        markup=True,
         size_hint_y=None,
         height=height,
         font_size=sp(font_size),
@@ -134,7 +185,8 @@ def card_widget(padding=dp(16), spacing=dp(8), orientation="vertical", **kwargs)
 def show_popup(title, message, color="text"):
     content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
     content.add_widget(make_label(message, size=14, color=color, halign="center"))
-    btn = make_button("OK", height=dp(44))
+    btn = make_button(f"{fa(IC['check'], 15)}  OK",
+                      height=dp(44), bg=C["green"], fg=C["bg"])
     content.add_widget(btn)
     popup = Popup(
         title=title,
@@ -153,8 +205,8 @@ def confirm_popup(title, message, on_confirm):
     content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
     content.add_widget(make_label(message, size=14, color="subtext", halign="center"))
     btns = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(44))
-    b_no  = make_button("Cancel", bg=C["card"])
-    b_yes = make_button("Delete",  bg=C["error"])
+    b_no  = make_button(f"{fa(IC['times'], 15)}  Cancel", bg=C["card"])
+    b_yes = make_button(f"{fa(IC['check'], 15)}  Delete", bg=C["error"])
     btns.add_widget(b_no)
     btns.add_widget(b_yes)
     content.add_widget(btns)
@@ -176,44 +228,88 @@ def confirm_popup(title, message, on_confirm):
 # ── Nav Bar ───────────────────────────────────────────────────────────────────
 
 class NavBar(ColoredBox):
+    # (FA codepoint, label text, screen name)
     TABS = [
-        ("🏠", "Dashboard",  "dashboard"),
-        ("📋", "Expenses",   "expenses"),
-        ("➕", "Add",        "add_expense"),
-        ("📊", "Stats",      "stats"),
-        ("⚙️", "Settings",   "settings"),
+        (IC["home"],    "Home",     "dashboard"),
+        (IC["list"],    "Expenses", "expenses"),
+        (IC["plus"],    "Add",      "add_expense"),
+        (IC["chart"],   "Stats",    "stats"),
+        (IC["cog"],     "Settings", "settings"),
     ]
 
     def __init__(self, screen_manager, **kwargs):
         super().__init__(bg_color=C["surface"], orientation="horizontal",
-                         size_hint_y=None, height=dp(60),
-                         padding=[dp(4), 0], spacing=0, **kwargs)
+                         size_hint_y=None, height=dp(64),
+                         padding=[dp(2), dp(4)], spacing=0, **kwargs)
         self.sm = screen_manager
-        self._btns = {}
-        for icon, label, screen in self.TABS:
-            btn = Button(
-                text=f"{icon}\n{label}",
-                font_size=sp(10),
+        self._btns  = {}   # screen_name → Button (for highlight)
+        self._icons = {}   # screen_name → icon Label (for color change)
+
+        for codepoint, label_text, screen in self.TABS:
+            # Each tab is a vertical box: icon on top, text below
+            col = BoxLayout(orientation="vertical", spacing=dp(1),
+                            padding=[0, dp(2)])
+
+            icon_lbl = Label(
+                text=f"[font=FA]{codepoint}[/font]" if _FA_OK else label_text[0],
+                markup=True,
+                font_size=sp(18),
                 color=hex_c("subtext"),
+                size_hint_y=None,
+                height=dp(26),
+                halign="center",
+                valign="middle",
+            )
+            icon_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+
+            text_lbl = Label(
+                text=label_text,
+                font_size=sp(9),
+                color=hex_c("subtext"),
+                size_hint_y=None,
+                height=dp(14),
+                halign="center",
+                valign="middle",
+            )
+            text_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+
+            # Invisible touch button overlaid on the column
+            btn = Button(
                 background_normal="",
                 background_color=(0, 0, 0, 0),
-                halign="center",
+                size_hint=(1, 1),
             )
             btn.bind(on_press=lambda b, s=screen: self._go(s))
-            self._btns[screen] = btn
-            self.add_widget(btn)
+
+            col.add_widget(icon_lbl)
+            col.add_widget(text_lbl)
+
+            # Stack button on top using a FloatLayout trick via a simple overlay
+            from kivy.uix.floatlayout import FloatLayout
+            tab = FloatLayout(size_hint_x=1)
+            col.size_hint = (1, 1)
+            tab.add_widget(col)
+            tab.add_widget(btn)
+
+            self._btns[screen]  = (icon_lbl, text_lbl)
+            self.add_widget(tab)
 
     def _go(self, screen_name):
         self.sm.transition = SlideTransition(duration=0.2)
         self.sm.current = screen_name
-        self.highlight(screen_name)
+        # Also highlight every screen's own navbar
+        for s in self.sm.screens:
+            if hasattr(s, "nav_bar") and s.nav_bar:
+                s.nav_bar.highlight(screen_name)
 
     def highlight(self, screen_name):
-        for name, btn in self._btns.items():
+        for name, (icon_lbl, text_lbl) in self._btns.items():
             if name == screen_name:
-                btn.color = hex_c("accent")
+                icon_lbl.color = hex_c("accent")
+                text_lbl.color = hex_c("accent")
             else:
-                btn.color = hex_c("subtext")
+                icon_lbl.color = hex_c("subtext")
+                text_lbl.color = hex_c("subtext")
 
 
 # ── Base Screen ───────────────────────────────────────────────────────────────
@@ -234,8 +330,9 @@ class BaseScreen(Screen):
 
     def go(self, screen_name):
         app = App.get_running_app()
+        app.sm.transition = SlideTransition(duration=0.2)
         app.sm.current = screen_name
-        # Highlight the correct tab on the destination screen's own navbar
+        # Highlight this screen's own navbar
         dest = app.sm.get_screen(screen_name)
         if dest.nav_bar:
             dest.nav_bar.highlight(screen_name)
@@ -256,19 +353,21 @@ class DashboardScreen(BaseScreen):
 
         # Header
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
-        header.add_widget(make_label("💸 ExpenseTracker", size=20, color="text", bold=True))
+        header.add_widget(make_label(f"{fa(IC['money'], 20)}  ExpenseTracker",
+                                      size=20, color="text", bold=True))
         header.add_widget(Widget())
-        btn_add = make_button("+ Add", height=dp(36), size_hint_x=None, width=dp(80))
+        btn_add = make_button(f"{fa(IC['plus'], 13)}  Add",
+                              height=dp(36), size_hint_x=None, width=dp(90))
         btn_add.bind(on_press=lambda _: self.go("add_expense"))
         header.add_widget(btn_add)
         ca.add_widget(header)
 
         # Month navigator
         nav = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(4))
-        btn_prev = make_button("◀", bg=C["card"], height=dp(36),
-                               size_hint_x=None, width=dp(40))
-        btn_next = make_button("▶", bg=C["card"], height=dp(36),
-                               size_hint_x=None, width=dp(40))
+        btn_prev = make_button(fa(IC["arrow_left"],  14), bg=C["card"],
+                               height=dp(36), size_hint_x=None, width=dp(44))
+        btn_next = make_button(fa(IC["arrow_right"], 14), bg=C["card"],
+                               height=dp(36), size_hint_x=None, width=dp(44))
         self.month_lbl = make_label(
             logic.month_year_label(self.current_month, self.current_year),
             size=15, color="text", bold=True, halign="center"
@@ -381,9 +480,11 @@ class ExpensesScreen(BaseScreen):
         ca.clear_widgets()
 
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
-        header.add_widget(make_label("📋 All Expenses", size=18, bold=True))
+        header.add_widget(make_label(f"{fa(IC['list'], 18)}  All Expenses",
+                                      size=18, bold=True))
         header.add_widget(Widget())
-        btn_add = make_button("+ Add", height=dp(36), size_hint_x=None, width=dp(80))
+        btn_add = make_button(f"{fa(IC['plus'], 13)}  Add",
+                              height=dp(36), size_hint_x=None, width=dp(90))
         btn_add.bind(on_press=lambda _: self.go("add_expense"))
         header.add_widget(btn_add)
         ca.add_widget(header)
@@ -442,11 +543,13 @@ class ExpensesScreen(BaseScreen):
                            spacing=dp(2))
         right.add_widget(make_label(exp["amount_display"], size=14, color="accent2",
                                      bold=True, halign="right"))
-        btn_row = BoxLayout(spacing=dp(4), size_hint_y=None, height=dp(26))
-        b_edit = make_button("✏️", bg=C["accent"], height=dp(26),
-                              size_hint_x=None, width=dp(36), font_size=11)
-        b_del  = make_button("🗑", bg=C["error"],  height=dp(26),
-                              size_hint_x=None, width=dp(36), font_size=11)
+        btn_row = BoxLayout(spacing=dp(4), size_hint_y=None, height=dp(28))
+        b_edit = make_button(f"{fa(IC['edit'],  12)}  Edit",
+                              bg=C["accent"], height=dp(28),
+                              size_hint_x=None, width=dp(66), font_size=10)
+        b_del  = make_button(f"{fa(IC['trash'], 12)}  Del",
+                              bg=C["error"],  height=dp(28),
+                              size_hint_x=None, width=dp(58), font_size=10)
         exp_id = exp["id"]
         b_edit.bind(on_press=lambda _, eid=exp_id: self._edit(eid))
         b_del.bind(on_press=lambda  _, eid=exp_id: self._delete(eid))
@@ -535,11 +638,13 @@ class AddExpenseScreen(BaseScreen):
 
         form.add_widget(Widget(size_hint_y=None, height=dp(8)))
 
-        self.btn_save = make_button("💾  Save Expense")
+        self.btn_save = make_button(f"{fa(IC['check'], 15)}  Save Expense",
+                                    bg=C["accent"])
         self.btn_save.bind(on_press=self._save)
         form.add_widget(self.btn_save)
 
-        self.btn_cancel = make_button("Cancel", bg=C["card"])
+        self.btn_cancel = make_button(f"{fa(IC['times'], 15)}  Cancel",
+                                       bg=C["card"])
         self.btn_cancel.bind(on_press=self._cancel)
         form.add_widget(self.btn_cancel)
 
@@ -552,9 +657,9 @@ class AddExpenseScreen(BaseScreen):
         exp = logic.get_expense(expense_id)
         if not exp:
             return
-        self._header_lbl.text = "✏️ Edit Expense"
-        self.btn_save.text     = "💾  Update Expense"
-        self.inp_title.text    = exp["title"]
+        self._header_lbl.text = f"{fa(IC['edit'], 16)}  Edit Expense"
+        self.btn_save.text    = f"{fa(IC['check'], 15)}  Update Expense"
+        self.inp_title.text   = exp["title"]
         self.inp_amount.text   = str(exp["amount"])
         self.inp_date.text     = exp["date"]
         self.inp_note.text     = exp.get("note", "")
@@ -581,20 +686,20 @@ class AddExpenseScreen(BaseScreen):
             ok, msg = logic.add_expense(title, amount, cat_id, date, note)
 
         if ok:
-            show_popup("✅ Saved", "Expense saved successfully!", color="green")
+            show_popup("✔ Saved", "Expense saved successfully!", color="green")
             self._reset()
             Clock.schedule_once(lambda _: self.go("expenses"), 0.6)
         else:
-            show_popup("❌ Error", msg, color="error")
+            show_popup("✖ Error", msg, color="error")
 
     def _cancel(self, _):
         self._reset()
         self.go("expenses")
 
     def _reset(self):
-        self._editing_id  = None
-        self._header_lbl.text = "➕ Add Expense"
-        self.btn_save.text    = "💾  Save Expense"
+        self._editing_id      = None
+        self._header_lbl.text = f"{fa(IC['plus'], 16)}  Add Expense"
+        self.btn_save.text    = f"{fa(IC['check'], 15)}  Save Expense"
         self.inp_title.text   = ""
         self.inp_amount.text  = ""
         self.inp_date.text    = logic.today_str()
@@ -618,14 +723,15 @@ class StatsScreen(BaseScreen):
     def _build(self):
         ca = self.content_area
         ca.clear_widgets()
-        ca.add_widget(make_label("📊 Statistics", size=18, bold=True,
+        ca.add_widget(make_label(f"{fa(IC['chart'], 18)}  Statistics",
+                                  size=18, bold=True,
                                   size_hint_y=None, height=dp(36)))
 
         nav = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(4))
-        btn_prev = make_button("◀", bg=C["card"], height=dp(36),
-                               size_hint_x=None, width=dp(40))
-        btn_next = make_button("▶", bg=C["card"], height=dp(36),
-                               size_hint_x=None, width=dp(40))
+        btn_prev = make_button(fa(IC["arrow_left"],  14), bg=C["card"],
+                               height=dp(36), size_hint_x=None, width=dp(44))
+        btn_next = make_button(fa(IC["arrow_right"], 14), bg=C["card"],
+                               height=dp(36), size_hint_x=None, width=dp(44))
         self.month_lbl = make_label(
             logic.month_year_label(self.current_month, self.current_year),
             size=15, color="text", bold=True, halign="center"
@@ -716,7 +822,8 @@ class SettingsScreen(BaseScreen):
     def _build(self):
         ca = self.content_area
         ca.clear_widgets()
-        ca.add_widget(make_label("⚙️ Settings & Budgets", size=18, bold=True,
+        ca.add_widget(make_label(f"{fa(IC['cog'], 18)}  Settings & Budgets",
+                                  size=18, bold=True,
                                   size_hint_y=None, height=dp(36)))
         ca.add_widget(make_label(
             "Set monthly budget limits per category:", size=13, color="subtext",
@@ -745,7 +852,7 @@ class SettingsScreen(BaseScreen):
             body.add_widget(row)
 
         body.add_widget(Widget(size_hint_y=None, height=dp(8)))
-        btn_save = make_button("💾  Save Budgets")
+        btn_save = make_button(f"{fa(IC['save'], 15)}  Save Budgets", bg=C["accent"])
         btn_save.bind(on_press=self._save_budgets)
         body.add_widget(btn_save)
 
@@ -763,7 +870,7 @@ class SettingsScreen(BaseScreen):
         if errors:
             show_popup("Error", "\n".join(errors), color="error")
         else:
-            show_popup("✅ Saved", "Budget limits updated!", color="green")
+            show_popup("✔ Saved", "Budget limits updated!", color="green")
 
     def on_enter(self, *_):
         self._build()
