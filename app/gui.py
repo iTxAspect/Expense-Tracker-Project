@@ -233,9 +233,12 @@ class BaseScreen(Screen):
         self.add_widget(root)
 
     def go(self, screen_name):
-        App.get_running_app().sm.current = screen_name
-        if self.nav_bar:
-            self.nav_bar.highlight(screen_name)
+        app = App.get_running_app()
+        app.sm.current = screen_name
+        # Highlight the correct tab on the destination screen's own navbar
+        dest = app.sm.get_screen(screen_name)
+        if dest.nav_bar:
+            dest.nav_bar.highlight(screen_name)
 
 
 # ── Dashboard Screen ──────────────────────────────────────────────────────────
@@ -792,20 +795,23 @@ class ExpenseTrackerApp(App):
 
         self.sm = ScreenManager()
 
-        nav = NavBar(self.sm)
-
+        # Each screen gets its OWN NavBar instance — a Kivy widget can only
+        # have one parent, so sharing a single NavBar across screens crashes.
         screens = [
-            DashboardScreen(name="dashboard",   nav_bar=nav),
-            ExpensesScreen (name="expenses",    nav_bar=nav),
-            AddExpenseScreen(name="add_expense", nav_bar=nav),
-            StatsScreen    (name="stats",       nav_bar=nav),
-            SettingsScreen (name="settings",    nav_bar=nav),
+            DashboardScreen (name="dashboard",   nav_bar=NavBar(self.sm)),
+            ExpensesScreen  (name="expenses",    nav_bar=NavBar(self.sm)),
+            AddExpenseScreen(name="add_expense", nav_bar=NavBar(self.sm)),
+            StatsScreen     (name="stats",       nav_bar=NavBar(self.sm)),
+            SettingsScreen  (name="settings",    nav_bar=NavBar(self.sm)),
         ]
         for s in screens:
             self.sm.add_widget(s)
 
         self.sm.current = "dashboard"
-        nav.highlight("dashboard")
+        # Highlight the active tab on every screen's nav bar
+        for s in screens:
+            if s.nav_bar:
+                s.nav_bar.highlight("dashboard")
 
         root = BoxLayout(orientation="vertical")
         root.add_widget(self.sm)
