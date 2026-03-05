@@ -388,11 +388,10 @@ class ExpensesScreen(BaseScreen):
         header.add_widget(btn_add)
         ca.add_widget(header)
 
-        # Filter spinner
-        cats = [("", "All Categories")] + logic.get_category_names()
-        self._cat_map_by_display = {f"{icon} {nm}" if icon else nm: cid
-                                     for cid, nm in (logic.get_category_names())}
-        spinner_values = [v for _, v in cats]
+        # Filter spinner — build display→id map from category names
+        cat_names = logic.get_category_names()   # [(id, "🍔 Food & Dining"), ...]
+        self._cat_map_by_display = {disp: cid for cid, disp in cat_names}
+        spinner_values = ["All Categories"] + [disp for _, disp in cat_names]
         self.cat_spinner = Spinner(
             text="All Categories",
             values=spinner_values,
@@ -415,16 +414,8 @@ class ExpensesScreen(BaseScreen):
 
     def _refresh(self):
         self.list_body.clear_widgets()
-        # Determine category filter
         sel = self.cat_spinner.text
-        cat_id = None
-        if sel != "All Categories":
-            for cid, name in logic.get_category_names():
-                display = f"{dict(zip(['id','name','icon','color'], []))} "
-                # match by display string
-                if f"{logic.get_category_map()[cid]['icon']} {name}" == sel or name == sel:
-                    cat_id = cid
-                    break
+        cat_id = self._cat_map_by_display.get(sel) if sel != "All Categories" else None
 
         expenses = logic.get_expenses(category_id=cat_id)
         if not expenses:
@@ -517,17 +508,9 @@ class AddExpenseScreen(BaseScreen):
 
         form.add_widget(make_label("Category *", size=12, color="subtext",
                                     size_hint_y=None, height=dp(18)))
-        cat_values = [f"{icon} {nm}" for _, (icon, nm)
-                      in [(cid, (logic.get_category_map()[cid]["icon"],
-                                  logic.get_category_map()[cid]["name"]))
-                          for cid, _ in logic.get_category_names()]]
-        # Simpler: rebuild from get_category_names
-        cat_names = logic.get_category_names()
-        self._cat_id_for_display = {}
-        display_vals = []
-        for cid, disp in cat_names:
-            self._cat_id_for_display[disp] = cid
-            display_vals.append(disp)
+        cat_names = logic.get_category_names()   # [(id, "🍔 Food & Dining"), ...]
+        self._cat_id_for_display = {disp: cid for cid, disp in cat_names}
+        display_vals = [disp for _, disp in cat_names]
         self.cat_spinner = Spinner(
             text=display_vals[0] if display_vals else "Select",
             values=display_vals,
