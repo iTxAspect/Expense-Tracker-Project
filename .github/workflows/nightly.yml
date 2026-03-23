@@ -1,0 +1,53 @@
+name: Nightly Tests
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC every night
+  workflow_dispatch:        # allow manual trigger
+
+jobs:
+  matrix-test:
+    name: "🌙 Nightly — Python ${{ matrix.python-version }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pytest pytest-cov pytest-timeout
+
+      - name: Run full test suite
+        run: |
+          pytest tests/ \
+            --timeout=30 \
+            -v \
+            --tb=short
+
+      - name: Syntax-check gui.py (no Kivy import)
+        run: python3 -c "import ast; ast.parse(open('app/gui.py').read()); print('gui.py: OK')"
+
+  dependency-audit:
+    name: "🔍 Nightly Dependency Audit"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.txt

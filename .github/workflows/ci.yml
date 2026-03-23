@@ -1,0 +1,310 @@
+name: Expense Tracker CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  PYTHON_VERSION: "3.11"
+  KIVY_VERSION:   "2.3.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 1 ── Lint & Static Analysis
+# ══════════════════════════════════════════════════════════════════════════════
+  lint:
+    name: "🔍 Lint & Static Analysis"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install flake8 pylint bandit
+
+      - name: flake8 — style & syntax errors
+        run: |
+          flake8 app/ \
+            --max-line-length=120 \
+            --extend-ignore=E501,W503 \
+            --exclude=__pycache__
+
+      - name: pylint — code quality (database + logic only, not gui)
+        run: |
+          pylint app/database.py app/logic.py \
+            --disable=C0114,C0115,C0116,R0903,W0611 \
+            --fail-under=7.0
+
+      - name: bandit — security lint
+        run: |
+          bandit -r app/database.py app/logic.py \
+            -ll \
+            --skip B101 \
+            -f txt
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 2 ── Unit & Integration Tests
+# ══════════════════════════════════════════════════════════════════════════════
+  test:
+    name: "🧪 Unit & Integration Tests"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-cov pytest-timeout
+
+      - name: Run test suite
+        run: |
+          pytest tests/ \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            --timeout=30 \
+            -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Coverage badge (comment on PR)
+        if: github.event_name == 'pull_request'
+        uses: orgoro/coverage@v3
+        with:
+          coverageFile: coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          thresholdAll: 0.80
+          thresholdNew: 0.85
+          thresholdModified: 0.85
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 3 ── Security Scan
+# ══════════════════════════════════════════════════════════════════════════════
+  security:
+    name: "🔒 Security Scan"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install security tools
+        run: pip install safety pip-audit
+
+      - name: pip-audit — dependency vulnerability check
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-0000-0000-0000
+
+      - name: safety — known CVE check
+        run: safety check -r requirements.txt --full-report
+        continue-on-error: true   # report but don't block on safety warnings
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Fail if any file contains a raw password or API key pattern
+          if grep -rn \
+            -e "password\s*=\s*['\"][^'\"]\+['\"]" \
+            -e "secret\s*=\s*['\"][^'\"]\+['\"]" \
+            -e "api_key\s*=\s*['\"][^'\"]\+['\"]" \
+            --include="*.py" app/; then
+            echo "❌ Potential hardcoded secret found!"
+            exit 1
+          fi
+          echo "✅ No hardcoded secrets detected."
+
+      - name: Verify password hashing (no plaintext storage)
+        run: |
+          python3 - << 'EOF'
+          import sys, os
+          sys.path.insert(0, "app")
+          import logic, database
+
+          # Init fresh in-memory test DB
+          import tempfile, sqlite3
+          with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+              db_path = f.name
+          database.DB_NAME = db_path
+          database.init_db()
+
+          ok, user = logic.register("sectest", "TestPass123")
+          assert ok, "Registration failed"
+          row = database.get_user_by_username("sectest")
+          assert row["password"] != "TestPass123", "CRITICAL: password stored in plaintext!"
+          assert "$" in row["password"], "Password not hashed (missing salt separator)"
+          print("✅ Password hashing verified — no plaintext stored.")
+          os.unlink(db_path)
+          EOF
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 4 ── Android APK Build  (only on main / release)
+# ══════════════════════════════════════════════════════════════════════════════
+  build-android:
+    name: "📱 Android APK Build"
+    runs-on: ubuntu-22.04
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Buildozer & Android SDK/NDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ~/.android
+          key: buildozer-${{ runner.os }}-${{ hashFiles('app/buildozer.spec') }}
+          restore-keys: |
+            buildozer-${{ runner.os }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk \
+            build-essential libssl-dev libffi-dev \
+            python3-dev libsqlite3-dev \
+            autoconf libtool pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 \
+            cmake libstdc++6 libexpat1-dev
+
+      - name: Install Buildozer
+        run: pip install buildozer cython==0.29.36
+
+      - name: Copy assets to app directory
+        run: |
+          cp fonts/fontawesome-webfont.ttf app/
+          ls app/
+
+      - name: Build debug APK
+        working-directory: app
+        run: buildozer android debug 2>&1 | tee buildozer.log
+        timeout-minutes: 60
+
+      - name: Verify APK was created
+        run: |
+          APK=$(find app/bin -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ APK not found! Build failed."
+            exit 1
+          fi
+          echo "✅ APK built: $APK"
+          echo "APK_PATH=$APK" >> $GITHUB_ENV
+          ls -lh "$APK"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: expense-tracker-debug-apk
+          path: app/bin/*.apk
+          retention-days: 30
+
+      - name: Upload buildozer log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-log
+          path: app/buildozer.log
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 5 ── Release APK  (signed, only on GitHub Release publish)
+# ══════════════════════════════════════════════════════════════════════════════
+  release-android:
+    name: "🚀 Sign & Release APK"
+    runs-on: ubuntu-22.04
+    needs: build-android
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: expense-tracker-debug-apk
+          path: bin/
+
+      - name: Sign APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: bin
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload signed APK to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            ## Expense Tracker ${{ github.ref_name }}
+            ### What's New
+            - See CHANGELOG.md for full details.
+
+            ### Installation
+            Download the APK and install on Android 5.0+ (API 21+).
+            Enable "Install from unknown sources" in device settings.
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  JOB 6 ── Notify
+# ══════════════════════════════════════════════════════════════════════════════
+  notify:
+    name: "📣 Pipeline Summary"
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, build-android]
+    if: always()
+
+    steps:
+      - name: Report pipeline result
+        run: |
+          echo "Pipeline results:"
+          echo "  Lint:     ${{ needs.lint.result }}"
+          echo "  Tests:    ${{ needs.test.result }}"
+          echo "  Security: ${{ needs.security.result }}"
+          echo "  Android:  ${{ needs.build-android.result }}"

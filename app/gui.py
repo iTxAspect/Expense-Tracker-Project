@@ -8,7 +8,7 @@ import os
 os.environ.setdefault("KIVY_NO_ENV_CONFIG", "1")
 
 from kivy.config import Config
-Config.set("graphics", "width",  "420")
+Config.set("graphics", "width",  "400")
 Config.set("graphics", "height", "800")
 Config.set("graphics", "resizable", "0")
 
@@ -184,6 +184,17 @@ def role_badge(role):
                        padding=[dp(4), 0])
     box.add_widget(Label(text=text, font_size=sp(9), bold=True,
                           color=hex_c("bg"), halign="center",
+                          valign="middle"))
+    return box
+
+
+def lock_badge():
+    """Red LOCKED badge for locked user accounts."""
+    box = ColoredBox(bg_color=C["error"], radius=dp(6),
+                     size_hint=(None, None), size=(dp(54), dp(20)),
+                     padding=[dp(4), 0])
+    box.add_widget(Label(text="LOCKED", font_size=sp(9), bold=True,
+                          color=hex_c("white"), halign="center",
                           valign="middle"))
     return box
 
@@ -972,8 +983,40 @@ class SettingsScreen(BaseScreen):
         pw_card.add_widget(cp_btn)
         body.add_widget(pw_card)
 
+        # ── Phase 4: CSV Export ───────────────────────────────────────────
+        body.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        body.add_widget(lbl("Data Export", size=13, color="subtext",
+                             size_hint_y=None, height=dp(22)))
+        exp_card = card(spacing=dp(10), padding=dp(14))
+        exp_card.add_widget(lbl(
+            "Export all your expenses to a CSV file you can open in Excel or Google Sheets.",
+            size=12, color="subtext"))
+        csv_btn = plain_btn("Export Expenses as CSV", bg=C["accent"],
+                             height=dp(46), font_size=13)
+        csv_btn.bind(on_press=self._export_csv)
+        exp_card.add_widget(csv_btn)
+        body.add_widget(exp_card)
+
         scroll.add_widget(body)
         ca.add_widget(scroll)
+
+    def _export_csv(self, _):
+        import os
+        from datetime import datetime
+        csv_str = logic.export_expenses_csv()
+        if not csv_str:
+            popup_ok("Error", "No expenses to export.", color="error")
+            return
+        # Save next to the app file
+        here     = os.path.dirname(os.path.abspath(__file__))
+        filename = f"expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filepath = os.path.join(here, filename)
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(csv_str)
+            popup_ok("Exported", f"Saved to:\n{filename}", color="green")
+        except Exception as e:
+            popup_ok("Error", f"Could not save file:\n{e}", color="error")
 
     def _save_budgets(self, _):
         errors = []
@@ -1007,75 +1050,109 @@ class SettingsScreen(BaseScreen):
 class AdminPanelScreen(BaseScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
+        self._tab = "users"   # "users" | "audit"
 
     def _build(self):
         ca = self.content_area
         ca.clear_widgets()
 
+        # ── Header ────────────────────────────────────────────────────────
         hdr = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-        hdr.add_widget(lbl("User Management", size=18, bold=True,
-                             color="admin"))
+        hdr.add_widget(lbl("Admin Panel", size=18, bold=True, color="admin"))
         hdr.add_widget(Widget())
-        add_b = icon_btn(IC["user"], "Add User", bg=C["admin"],
-                          color_key="bg",
-                          height=dp(34), size_hint_x=None, width=dp(100))
+        add_b = plain_btn("+ Add User", bg=C["admin"], fg="bg",
+                           height=dp(34), font_size=11,
+                           size_hint_x=None, width=dp(90))
         add_b.bind(on_press=self._show_add_user)
         hdr.add_widget(add_b)
         ca.add_widget(hdr)
 
-        # Summary banner
+        # ── Tab bar: Users | Audit Log ────────────────────────────────────
+        tab_bar = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
+        for tab_id, label in [("users", "Users"), ("audit", "Audit Log")]:
+            bg = C["accent"] if self._tab == tab_id else C["card"]
+            fg = "white"     if self._tab == tab_id else "subtext"
+            tb = plain_btn(label, bg=bg, fg=fg, height=dp(38), font_size=12)
+            tb.bind(on_press=lambda _, t=tab_id: self._switch_tab(t))
+            tab_bar.add_widget(tb)
+        ca.add_widget(tab_bar)
+
+        # ── Summary banner ────────────────────────────────────────────────
         stats = logic.get_admin_stats()
         if stats:
             total_users  = len(stats)
-            total_admins = sum(1 for s in stats if s["role"] == "admin")
+            locked_users = sum(1 for s in stats if s.get("is_locked"))
             grand        = sum(s["total_spent"] for s in stats)
             banner = card(orientation="horizontal", size_hint_y=None,
-                           height=dp(52), spacing=dp(4))
-            banner.add_widget(lbl(f"{total_users} Users\n{total_admins} Admin",
-                                   size=11, color="admin", halign="center"))
-            banner.add_widget(lbl(f"Total Spent\n{logic.format_currency(grand)}",
-                                   size=11, color="accent", halign="center"))
+                           height=dp(48), spacing=dp(4))
+            banner.add_widget(lbl(f"{total_users} Users",
+                                   size=12, color="admin", halign="center", bold=True))
+            if locked_users:
+                banner.add_widget(lbl(f"{locked_users} Locked",
+                                       size=12, color="error", halign="center", bold=True))
+            banner.add_widget(lbl(f"Total: {logic.format_currency(grand)}",
+                                   size=12, color="accent", halign="center", bold=True))
             ca.add_widget(banner)
 
-        scroll   = ScrollView(do_scroll_x=False)
+        scroll    = ScrollView(do_scroll_x=False)
         self.body = BoxLayout(orientation="vertical", spacing=dp(8),
                                size_hint_y=None, padding=[0, dp(4)])
         self.body.bind(minimum_height=self.body.setter("height"))
-        self._fill_users()
+        if self._tab == "users":
+            self._fill_users()
+        else:
+            self._fill_audit()
         scroll.add_widget(self.body)
         ca.add_widget(scroll)
+
+    def _switch_tab(self, tab_id):
+        self._tab = tab_id
+        self._build()
 
     def _fill_users(self):
         self.body.clear_widgets()
         users = logic.admin_get_all_users()
         me    = logic.get_current_user()
         for u in users:
+            is_locked = bool(u.get("is_locked"))
+            row_h     = dp(72) if is_locked else dp(62)
             r = card(orientation="horizontal", size_hint_y=None,
-                      height=dp(62), padding=[dp(10), dp(6)], spacing=dp(8))
-            # Left: name + meta
-            info = BoxLayout(orientation="vertical", spacing=dp(3))
-            name_row = BoxLayout(spacing=dp(8), size_hint_y=None, height=dp(24))
-            name_row.add_widget(lbl(u["username"], size=14, bold=True,
-                                     size_hint_x=None,
-                                     width=dp(120)))
+                      height=row_h, padding=[dp(10), dp(6)], spacing=dp(8))
+            # Left: name + badges + meta
+            info = BoxLayout(orientation="vertical", spacing=dp(2))
+            name_row = BoxLayout(spacing=dp(6), size_hint_y=None, height=dp(24))
+            name_row.add_widget(lbl(u["username"], size=13, bold=True,
+                                     size_hint_x=None, width=dp(110)))
             name_row.add_widget(role_badge(u["role"]))
+            if is_locked:
+                name_row.add_widget(lock_badge())
             info.add_widget(name_row)
-            info.add_widget(lbl(f"Joined: {u['created_at'][:10]}",
-                                 size=10, color="subtext"))
+            joined = u.get("created_at", "")[:10]
+            sub    = f"Joined: {joined}"
+            if is_locked and u.get("locked_until"):
+                sub += f"  · Locked until {u['locked_until'][:16]}"
+            info.add_widget(lbl(sub, size=10, color="subtext"))
             r.add_widget(info)
             r.add_widget(Widget())
 
             # Right: action buttons (skip for self)
             if u["id"] != me["id"]:
                 btns = BoxLayout(spacing=dp(4),
-                                 size_hint_x=None, width=dp(100))
+                                 size_hint_x=None, width=dp(120))
+                # Unlock button if locked
+                if is_locked:
+                    ub = plain_btn("Unlock", bg=C["green"], fg="bg",
+                                   height=dp(28), font_size=9,
+                                   size_hint_x=None, width=dp(52))
+                    ub.bind(on_press=lambda _, uid=u["id"]: self._unlock(uid))
+                    btns.add_widget(ub)
                 # Toggle role button
                 new_role = "user" if u["role"] == "admin" else "admin"
                 rb_text  = "→User" if u["role"] == "admin" else "→Admin"
                 rb_color = C["warning"] if u["role"] == "admin" else C["green"]
                 rb = plain_btn(rb_text, bg=rb_color, fg="bg",
-                               height=dp(30), font_size=10,
-                               size_hint_x=None, width=dp(54))
+                               height=dp(28), font_size=9,
+                               size_hint_x=None, width=dp(52))
                 rb.bind(on_press=lambda _, uid=u["id"], nr=new_role:
                         self._change_role(uid, nr))
                 del_b = plain_btn("Del", bg=C["error"], fg="white",
@@ -1159,6 +1236,52 @@ class AdminPanelScreen(BaseScreen):
             self._fill_users()
         b_create.bind(on_press=_create)
         p.open()
+
+    def _unlock(self, uid):
+        ok, msg = logic.admin_unlock_user(uid)
+        if ok:
+            self._fill_users()
+        else:
+            popup_ok("Error", msg, color="error")
+
+    def _fill_audit(self):
+        self.body.clear_widgets()
+        logs = logic.get_audit_log(limit=200)
+        if not logs:
+            self.body.add_widget(lbl("No audit events yet.", size=13,
+                                      color="subtext", halign="center",
+                                      size_hint_y=None, height=dp(50)))
+            return
+        for entry in logs:
+            r = card(orientation="horizontal", size_hint_y=None,
+                      height=dp(52), padding=[dp(10), dp(4)], spacing=dp(8))
+            left = BoxLayout(orientation="vertical", spacing=dp(2))
+            action_color = {
+                "LOCKOUT":        "error",
+                "DELETE_USER":    "error",
+                "LOGIN":          "green",
+                "LOGOUT":         "subtext",
+                "UNLOCK_USER":    "warning",
+                "CHANGE_ROLE":    "warning",
+                "CHANGE_PASSWORD":"accent",
+                "EXPORT_CSV":     "accent",
+            }.get(entry["action"], "text")
+            left.add_widget(lbl(entry["action"], size=12, bold=True,
+                                 color=action_color))
+            detail = entry.get("target", "")
+            if entry.get("detail"):
+                detail += f"  · {entry['detail']}"
+            left.add_widget(lbl(detail, size=10, color="subtext"))
+            r.add_widget(left)
+            r.add_widget(Widget())
+            ts = entry.get("created_at", "")[:16].replace("T", " ")
+            right = BoxLayout(orientation="vertical", spacing=dp(2),
+                               size_hint_x=None, width=dp(100))
+            right.add_widget(lbl(entry.get("actor_name", "?"), size=10,
+                                  color="subtext", halign="right"))
+            right.add_widget(lbl(ts, size=9, color="subtext", halign="right"))
+            r.add_widget(right)
+            self.body.add_widget(r)
 
     def on_enter(self, *_): self._build()
 

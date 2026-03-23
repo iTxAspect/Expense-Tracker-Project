@@ -1,0 +1,13 @@
+[flake8]
+max-line-length = 120
+extend-ignore   = E501, W503, E203
+exclude         =
+    __pycache__,
+    .git,
+    .github,
+    *.egg-info,
+    build,
+    dist,
+    .buildozer
+per-file-ignores =
+    app/gui.py: E302, E303, E501    # Kivy UI code has longer lines

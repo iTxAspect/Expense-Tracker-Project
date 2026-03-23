@@ -1,7 +1,6 @@
 """
 database.py — SQLite persistence layer for Expense Tracker
-Tables: users, categories, expenses, budgets
-All expense queries are scoped by user_id (admin sees all via user_id=None).
+Tables: users, categories, expenses, budgets, login_attempts, audit_log
 """
 
 import sqlite3
@@ -15,6 +14,7 @@ def get_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")   # Phase 3: WAL mode for safety
     return conn
 
 
@@ -24,14 +24,23 @@ def init_db():
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            username   TEXT    NOT NULL UNIQUE,
-            password   TEXT    NOT NULL,
-            role       TEXT    NOT NULL DEFAULT 'user'
-                               CHECK(role IN ('user','admin')),
-            created_at TEXT    DEFAULT CURRENT_TIMESTAMP
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            username        TEXT    NOT NULL UNIQUE,
+            password        TEXT    NOT NULL,
+            role            TEXT    NOT NULL DEFAULT 'user'
+                                    CHECK(role IN ('user','admin')),
+            is_locked       INTEGER NOT NULL DEFAULT 0,
+            locked_until    TEXT    DEFAULT NULL,
+            created_at      TEXT    DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # ── Phase 3: migrate existing users table if columns missing ──────────────
+    cols = {row[1] for row in c.execute("PRAGMA table_info(users)")}
+    if "is_locked" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0")
+    if "locked_until" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN locked_until TEXT DEFAULT NULL")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS categories (
@@ -68,6 +77,37 @@ def init_db():
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
         )
     """)
+
+    # ── Phase 3: login_attempts — brute-force tracking ────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            username    TEXT    NOT NULL,
+            success     INTEGER NOT NULL DEFAULT 0,
+            ip_hint     TEXT    DEFAULT 'local',
+            attempted_at TEXT   DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ── Phase 3: audit_log — admin action trail ───────────────────────────────
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_id    INTEGER,
+            actor_name  TEXT    NOT NULL,
+            action      TEXT    NOT NULL,
+            target      TEXT    DEFAULT '',
+            detail      TEXT    DEFAULT '',
+            created_at  TEXT    DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+
+    # ── Indexes for performance ───────────────────────────────────────────────
+    c.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, date)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_expenses_category  ON expenses(category_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_attempts_username  ON login_attempts(username, attempted_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_audit_actor        ON audit_log(actor_id, created_at)")
 
     defaults = [
         ("Food & Dining", "F", "#FF5722"),
@@ -128,7 +168,10 @@ def get_user_by_id(user_id):
 def get_all_users():
     conn = get_connection()
     c    = conn.cursor()
-    c.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at")
+    c.execute("""
+        SELECT id, username, role, is_locked, locked_until, created_at
+        FROM users ORDER BY created_at
+    """)
     rows = c.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -163,6 +206,81 @@ def count_admins():
     n = c.fetchone()[0]
     conn.close()
     return n
+
+
+# ── Phase 3: LOCKOUT ──────────────────────────────────────────────────────────
+
+def set_user_locked(user_id, locked_until_iso: str | None):
+    """
+    Lock or unlock a user account.
+    locked_until_iso = ISO datetime string, or None to unlock.
+    """
+    conn = get_connection()
+    is_locked = 1 if locked_until_iso else 0
+    conn.execute(
+        "UPDATE users SET is_locked=?, locked_until=? WHERE id=?",
+        (is_locked, locked_until_iso, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def record_login_attempt(username, success: bool, ip_hint: str = "local"):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO login_attempts (username, success, ip_hint) VALUES (?,?,?)",
+        (username.strip(), 1 if success else 0, ip_hint)
+    )
+    conn.commit()
+    conn.close()
+
+
+def count_recent_failures(username, within_minutes: int = 30) -> int:
+    """Count failed login attempts for username in the last N minutes."""
+    conn = get_connection()
+    c    = conn.cursor()
+    c.execute("""
+        SELECT COUNT(*) FROM login_attempts
+        WHERE username = ?
+          AND success  = 0
+          AND attempted_at >= datetime('now', ? || ' minutes')
+    """, (username.strip(), f"-{within_minutes}"))
+    n = c.fetchone()[0]
+    conn.close()
+    return n
+
+
+def clear_login_attempts(username):
+    conn = get_connection()
+    conn.execute("DELETE FROM login_attempts WHERE username=?", (username.strip(),))
+    conn.commit()
+    conn.close()
+
+
+# ── Phase 3: AUDIT LOG ────────────────────────────────────────────────────────
+
+def write_audit(actor_id, actor_name: str, action: str,
+                target: str = "", detail: str = ""):
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO audit_log (actor_id, actor_name, action, target, detail)
+           VALUES (?,?,?,?,?)""",
+        (actor_id, actor_name, action, target, detail)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_audit_log(limit: int = 100) -> list[dict]:
+    conn = get_connection()
+    c    = conn.cursor()
+    c.execute("""
+        SELECT * FROM audit_log
+        ORDER BY created_at DESC LIMIT ?
+    """, (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── EXPENSE CRUD ──────────────────────────────────────────────────────────────
@@ -332,11 +450,10 @@ def get_recent_expenses(n=5, user_id=None):
 
 
 def get_global_stats():
-    """Admin only — per-user totals."""
     conn = get_connection()
     c    = conn.cursor()
     c.execute("""
-        SELECT u.id, u.username, u.role,
+        SELECT u.id, u.username, u.role, u.is_locked,
                COUNT(e.id) AS expense_count,
                COALESCE(SUM(e.amount),0) AS total_spent
         FROM users u

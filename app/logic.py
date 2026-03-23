@@ -1,27 +1,34 @@
 """
 logic.py — Business logic layer for Expense Tracker
-Handles: auth (login/register/logout), validation, formatting,
-         expense operations, stats, budget management.
-Session state is kept in this module (current_user dict).
+Phase 3 additions:
+  - Brute-force login lockout (5 attempts → 30-min cooldown)
+  - Audit log for all admin actions
+  - Input sanitisation helper
+  - CSV export
 """
 
 import hashlib
 import hmac
 import os
+import csv
+import io
+import re
 import secrets
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import database as db
 
 
 # ── Session State ─────────────────────────────────────────────────────────────
-# Single in-memory session. On Android the process lives as long as the app.
 current_user: dict | None = None
 
+# ── Lockout config ────────────────────────────────────────────────────────────
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_MINUTES     = 30
 
-# ── Password Hashing (PBKDF2-HMAC-SHA256, no external deps) ──────────────────
+
+# ── Password Hashing (PBKDF2-HMAC-SHA256) ────────────────────────────────────
 
 def _hash_password(plain: str, salt: str = None) -> str:
-    """Return 'salt$hash' string. Generate new salt when salt is None."""
     if salt is None:
         salt = secrets.token_hex(16)
     key = hashlib.pbkdf2_hmac(
@@ -32,7 +39,6 @@ def _hash_password(plain: str, salt: str = None) -> str:
 
 
 def _verify_password(plain: str, stored: str) -> bool:
-    """Verify a plain password against a stored 'salt$hash' string."""
     try:
         salt, _ = stored.split("$", 1)
         return hmac.compare_digest(stored, _hash_password(plain, salt))
@@ -40,13 +46,25 @@ def _verify_password(plain: str, stored: str) -> bool:
         return False
 
 
+# ── Phase 3: Input Sanitisation ───────────────────────────────────────────────
+
+def sanitise(text: str, max_len: int = 200) -> str:
+    """
+    Strip leading/trailing whitespace, collapse internal whitespace,
+    remove control characters, and truncate to max_len.
+    Safe to use on all free-text fields before DB write.
+    """
+    if not isinstance(text, str):
+        return ""
+    # Remove control characters (keep newlines for note fields)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = text.strip()
+    return text[:max_len]
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 def register(username: str, password: str, role: str = "user"):
-    """
-    Register a new user. Returns (True, user_dict) or (False, error_msg).
-    Role 'admin' can only be set by an existing admin or during first-run seed.
-    """
     if not username or not username.strip():
         return False, "Username cannot be empty."
     if len(username.strip()) < 3:
@@ -57,7 +75,7 @@ def register(username: str, password: str, role: str = "user"):
         return False, "Invalid role."
 
     hashed = _hash_password(password)
-    uid    = db.create_user(username.strip(), hashed, role)
+    uid    = db.create_user(sanitise(username, 50), hashed, role)
     if uid is None:
         return False, "Username already taken."
     user = db.get_user_by_id(uid)
@@ -66,23 +84,83 @@ def register(username: str, password: str, role: str = "user"):
 
 def login(username: str, password: str):
     """
-    Authenticate. Returns (True, user_dict) or (False, error_msg).
-    Sets global current_user on success.
+    Authenticate with brute-force lockout.
+    Returns (True, user_dict) or (False, error_msg).
     """
     global current_user
     if not username or not password:
         return False, "Username and password are required."
+
+    username = username.strip()
+
+    # ── Check account lockout ─────────────────────────────────────────────
     user = db.get_user_by_username(username)
+    if user:
+        if user.get("is_locked"):
+            locked_until = user.get("locked_until")
+            if locked_until:
+                try:
+                    until_dt = datetime.fromisoformat(locked_until)
+                    if datetime.now() < until_dt:
+                        remaining = int((until_dt - datetime.now()).total_seconds() / 60) + 1
+                        return False, (
+                            f"Account locked due to too many failed attempts. "
+                            f"Try again in {remaining} minute(s)."
+                        )
+                    else:
+                        # Lockout expired — automatically unlock
+                        db.set_user_locked(user["id"], None)
+                        db.clear_login_attempts(username)
+                        user = db.get_user_by_username(username)
+                except ValueError:
+                    pass
+
+    # ── Check recent failure count (even for unknown users) ──────────────
+    recent_failures = db.count_recent_failures(username, LOCKOUT_MINUTES)
+    if recent_failures >= MAX_FAILED_ATTEMPTS:
+        # Apply lockout if not already set
+        if user and not user.get("is_locked"):
+            until = (datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+            db.set_user_locked(user["id"], until)
+            _audit(None, "system", "LOCKOUT", username,
+                   f"{MAX_FAILED_ATTEMPTS} failed attempts in {LOCKOUT_MINUTES} min")
+        return False, (
+            f"Account locked after {MAX_FAILED_ATTEMPTS} failed attempts. "
+            f"Try again in {LOCKOUT_MINUTES} minutes."
+        )
+
+    # ── Validate credentials ──────────────────────────────────────────────
     if not user:
+        db.record_login_attempt(username, success=False)
         return False, "User not found."
+
     if not _verify_password(password, user["password"]):
-        return False, "Incorrect password."
+        db.record_login_attempt(username, success=False)
+        # Check if this failure tips over the threshold
+        failures_now = db.count_recent_failures(username, LOCKOUT_MINUTES)
+        if failures_now >= MAX_FAILED_ATTEMPTS:
+            until = (datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)).isoformat()
+            db.set_user_locked(user["id"], until)
+            _audit(None, "system", "LOCKOUT", username,
+                   f"Locked after {MAX_FAILED_ATTEMPTS} failed attempts")
+            return False, (
+                f"Too many failed attempts. Account locked for {LOCKOUT_MINUTES} minutes."
+            )
+        remaining_attempts = MAX_FAILED_ATTEMPTS - failures_now
+        return False, f"Incorrect password. {remaining_attempts} attempt(s) remaining."
+
+    # ── Success ───────────────────────────────────────────────────────────
+    db.record_login_attempt(username, success=True)
+    db.clear_login_attempts(username)   # reset counter on success
     current_user = user
+    _audit(user["id"], user["username"], "LOGIN", "", "Successful login")
     return True, user
 
 
 def logout():
     global current_user
+    if current_user:
+        _audit(current_user["id"], current_user["username"], "LOGOUT")
     current_user = None
 
 
@@ -99,20 +177,25 @@ def is_logged_in() -> bool:
 
 
 def _uid():
-    """Return current user's id, or None (admin sees all)."""
     if current_user is None:
         return None
     return None if is_admin() else current_user["id"]
 
 
-# ── Seed default admin on first run ──────────────────────────────────────────
+# ── Audit log helper ──────────────────────────────────────────────────────────
+
+def _audit(actor_id, actor_name: str, action: str,
+           target: str = "", detail: str = ""):
+    """Internal — write an audit log entry. Never raises."""
+    try:
+        db.write_audit(actor_id, actor_name, action, target, detail)
+    except Exception:
+        pass   # audit must never crash the main flow
+
+
+# ── Seed ─────────────────────────────────────────────────────────────────────
 
 def seed_admin_if_needed():
-    """
-    Create a default admin account if no admin exists yet.
-    Default credentials:  admin / Admin123
-    The user should change this password after first login.
-    """
     if db.count_admins() == 0:
         register("admin", "Admin123", role="admin")
 
@@ -190,8 +273,12 @@ def add_expense(title, amount_str, category_id, date_str, note=""):
     if not ok:
         return False, err
     eid = db.add_expense(
-        current_user["id"], title.strip(),
-        float(amount_str), category_id, date_str, note.strip()
+        current_user["id"],
+        sanitise(title, 100),
+        float(amount_str),
+        category_id,
+        date_str,
+        sanitise(note, 500)
     )
     return True, eid
 
@@ -199,7 +286,6 @@ def add_expense(title, amount_str, category_id, date_str, note=""):
 def update_expense(expense_id, title, amount_str, category_id, date_str, note=""):
     if not is_logged_in():
         return False, "Not logged in."
-    # Ownership check: admins can edit any expense, users only their own
     if not is_admin():
         exp = db.get_expense_by_id(expense_id)
         if not exp or exp["user_id"] != current_user["id"]:
@@ -208,8 +294,12 @@ def update_expense(expense_id, title, amount_str, category_id, date_str, note=""
     if not ok:
         return False, err
     db.update_expense(
-        expense_id, title.strip(), float(amount_str),
-        category_id, date_str, note.strip()
+        expense_id,
+        sanitise(title, 100),
+        float(amount_str),
+        category_id,
+        date_str,
+        sanitise(note, 500)
     )
     return True, None
 
@@ -229,7 +319,6 @@ def get_expense(expense_id):
 
 
 def get_expenses(category_id=None, month=None, year=None, limit=None):
-    """Returns display-ready rows. Admins see all users; users see own only."""
     rows = db.get_all_expenses(
         user_id=_uid(),
         category_id=category_id, month=month, year=year, limit=limit
@@ -240,6 +329,45 @@ def get_expenses(category_id=None, month=None, year=None, limit=None):
 def get_recent(n=5):
     rows = db.get_recent_expenses(n=n, user_id=_uid())
     return [format_expense_row(r) for r in rows]
+
+
+# ── Phase 4: CSV Export ───────────────────────────────────────────────────────
+
+def export_expenses_csv(month=None, year=None) -> str:
+    """
+    Export the current user's expenses (or all for admin) as a CSV string.
+    Returns the CSV text ready to write to a file.
+    """
+    if not is_logged_in():
+        return ""
+    rows = db.get_all_expenses(user_id=_uid(), month=month, year=year)
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if is_admin():
+        headers = ["id", "username", "title", "amount", "category",
+                   "date", "note", "created_at"]
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([
+                r["id"], r.get("username", ""),
+                r["title"], r["amount"],
+                r.get("category_name", ""),
+                r["date"], r.get("note", ""), r["created_at"]
+            ])
+    else:
+        headers = ["id", "title", "amount", "category", "date", "note", "created_at"]
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([
+                r["id"], r["title"], r["amount"],
+                r.get("category_name", ""),
+                r["date"], r.get("note", ""), r["created_at"]
+            ])
+
+    _audit(current_user["id"], current_user["username"],
+           "EXPORT_CSV", "", f"{len(rows)} rows exported")
+    return output.getvalue()
 
 
 # ── Categories ────────────────────────────────────────────────────────────────
@@ -261,18 +389,24 @@ def add_category(name, icon="?", color="#4CAF50"):
         return False, "Admin access required."
     if not name.strip():
         return False, "Category name cannot be empty."
-    db.add_category(name.strip(), icon, color)
+    db.add_category(sanitise(name, 50), icon, color)
+    _audit(current_user["id"], current_user["username"],
+           "ADD_CATEGORY", name, "")
     return True, None
 
 
 def delete_category(category_id):
     if not is_admin():
         return False, "Admin access required."
+    cat = get_category_map().get(category_id)
     db.delete_category(category_id)
+    if cat:
+        _audit(current_user["id"], current_user["username"],
+               "DELETE_CATEGORY", cat["name"], "")
     return True, None
 
 
-# ── Dashboard / Stats ────────────────────────────────────────────────────────
+# ── Dashboard / Stats ─────────────────────────────────────────────────────────
 
 def get_dashboard_data(month=None, year=None):
     now   = datetime.now()
@@ -311,10 +445,15 @@ def get_dashboard_data(month=None, year=None):
 
 
 def get_admin_stats():
-    """Admin-only global overview."""
     if not is_admin():
         return []
     return db.get_global_stats()
+
+
+def get_audit_log(limit=100):
+    if not is_admin():
+        return []
+    return db.get_audit_log(limit)
 
 
 # ── Budget ────────────────────────────────────────────────────────────────────
@@ -351,10 +490,13 @@ def admin_delete_user(user_id):
         return False, "Admin access required."
     if user_id == current_user["id"]:
         return False, "Cannot delete your own account."
-    if db.get_user_by_id(user_id) and db.get_user_by_id(user_id)["role"] == "admin":
-        if db.count_admins() <= 1:
-            return False, "Cannot delete the last admin."
+    target = db.get_user_by_id(user_id)
+    if target and target["role"] == "admin" and db.count_admins() <= 1:
+        return False, "Cannot delete the last admin."
+    target_name = target["username"] if target else str(user_id)
     db.delete_user(user_id)
+    _audit(current_user["id"], current_user["username"],
+           "DELETE_USER", target_name, f"role was {target['role'] if target else '?'}")
     return True, None
 
 
@@ -366,7 +508,24 @@ def admin_change_role(user_id, new_role):
     if user_id == current_user["id"] and new_role == "user":
         if db.count_admins() <= 1:
             return False, "Cannot demote the last admin."
+    target = db.get_user_by_id(user_id)
+    old_role = target["role"] if target else "?"
     db.update_user_role(user_id, new_role)
+    _audit(current_user["id"], current_user["username"],
+           "CHANGE_ROLE", target["username"] if target else str(user_id),
+           f"{old_role} → {new_role}")
+    return True, None
+
+
+def admin_unlock_user(user_id):
+    """Manually unlock a locked account."""
+    if not is_admin():
+        return False, "Admin access required."
+    target = db.get_user_by_id(user_id)
+    db.set_user_locked(user_id, None)
+    db.clear_login_attempts(target["username"] if target else "")
+    _audit(current_user["id"], current_user["username"],
+           "UNLOCK_USER", target["username"] if target else str(user_id), "")
     return True, None
 
 
@@ -380,7 +539,8 @@ def change_own_password(old_password, new_password):
         return False, "New password must be at least 6 characters."
     hashed = _hash_password(new_password)
     db.change_password(current_user["id"], hashed)
-    # Refresh session with updated data
+    _audit(current_user["id"], current_user["username"],
+           "CHANGE_PASSWORD", "", "")
     current_user = db.get_user_by_id(current_user["id"])
     return True, None
 
@@ -388,6 +548,5 @@ def change_own_password(old_password, new_password):
 # ── Init ──────────────────────────────────────────────────────────────────────
 
 def init():
-    """Call once at app startup."""
     db.init_db()
     seed_admin_if_needed()

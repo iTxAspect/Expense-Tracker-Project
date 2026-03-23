@@ -1,0 +1,49 @@
+name: PR Quick Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  quick-check:
+    name: "⚡ Quick Check (lint + tests)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install all dependencies
+        run: pip install flake8 pytest pytest-cov pytest-timeout
+
+      - name: Lint (errors only — fast)
+        run: flake8 app/ --select=E9,F63,F7,F82 --max-line-length=120
+
+      - name: Syntax check all Python files
+        run: |
+          for f in app/database.py app/logic.py app/gui.py; do
+            python3 -m py_compile "$f" && echo "✅ $f" || exit 1
+          done
+
+      - name: Run tests
+        run: |
+          pytest tests/ \
+            --timeout=20 \
+            -q \
+            --tb=short
+
+      - name: Post test summary
+        if: always()
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Branch: \`${{ github.head_ref }}\` → \`${{ github.base_ref }}\`" >> $GITHUB_STEP_SUMMARY
