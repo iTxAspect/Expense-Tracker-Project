@@ -8,7 +8,7 @@ import os
 os.environ.setdefault("KIVY_NO_ENV_CONFIG", "1")
 
 from kivy.config import Config
-Config.set("graphics", "width",  "400")
+Config.set("graphics", "width",  "500")
 Config.set("graphics", "height", "800")
 Config.set("graphics", "resizable", "0")
 
