@@ -36,24 +36,11 @@ It is designed as a full application for future use.
 ---
 
 ## 🛠️ Tech Stack
-- Language: Java  
-- GUI: Swing  
+- Language: Python   
 - Version Control: Git & GitHub  
 
 ---
 
-## 📂 Project Structure
-Expense-Tracker-Project/
-│
-├── Main/
-│   ├── MainPanal.java
-│   ├── (other classes)
-│
-├── assets/
-├── data/
-├── README.md
-
----
 
 ## 🚀 Getting Started
 
@@ -61,24 +48,9 @@ Expense-Tracker-Project/
 git clone https://github.com/iTxAspect/Expense-Tracker-Project.git
 cd Expense-Tracker-Project
 
-### Run the Project
-javac Main/MainPanal.java
-java Main.MainPanal
 
 ---
 
-## 📸 Demo
-
-![Main UI](assets/main-ui.png)
-![Add Expense](assets/add-expense.png)
-![View Expenses](assets/view-expenses.png)
-
----
-
-## 🎥 Demo GIF
-![Demo GIF](assets/demo.gif)
-
----
 
 ## 📈 Future Plans
 - Mobile app version  
@@ -89,10 +61,6 @@ java Main.MainPanal
 
 ---
 
-## 🤝 Contributors
-- Ibrahim Aldolaaee  
-
----
 
 ## 📄 License
 MIT License
