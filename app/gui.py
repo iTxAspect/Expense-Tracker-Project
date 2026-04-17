@@ -61,7 +61,9 @@ C = {
     "admin":   "#FFB347", "user_c":  "#4ECCA3",
 }
 
-def hex_c(k): return get_color_from_hex(C[k])
+def hex_c(k):
+    """Accept either a palette key ('accent') or a raw hex string ('#6C63FF')."""
+    return get_color_from_hex(C[k] if k in C else k)
 
 # ── Shared Widgets ────────────────────────────────────────────────────────────
 
