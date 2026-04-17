@@ -66,6 +66,11 @@ def hex_c(k): return get_color_from_hex(C[k])
 # ── Shared Widgets ────────────────────────────────────────────────────────────
 
 class ColoredBox(BoxLayout):
+    """
+    Encapsulation: wraps BoxLayout with a managed canvas background.
+    Inheritance: extends BoxLayout, adds _bg/_rad state and _draw logic.
+    Used as the base for cards, NavBar, and all coloured containers.
+    """
     def __init__(self, bg_color, radius=0, **kw):
         super().__init__(**kw)
         self._bg  = bg_color
@@ -135,7 +140,6 @@ def icon_btn(codepoint, label_text, bg, size=15, height=dp(48),
         bold=True,
         **kw
     )
-    bg_color = get_color_from_hex(bg)
     def _draw(btn, *_):
         btn.canvas.before.clear()
         with btn.canvas.before:
@@ -202,6 +206,12 @@ def lock_badge():
 # ── NavBar ────────────────────────────────────────────────────────────────────
 
 class NavBar(ColoredBox):
+    """
+    Inheritance: extends ColoredBox (which extends BoxLayout).
+    Polymorphism: renders USER_TABS or ADMIN_TABS based on role at runtime.
+    Encapsulation: tab state (_tabs dict) and navigation logic are private.
+    Class-level constants USER_TABS / ADMIN_TABS demonstrate class attributes.
+    """
     USER_TABS  = [
         (IC["home"],   "Home",     "dashboard"),
         (IC["list"],   "Expenses", "expenses"),
@@ -268,6 +278,13 @@ class NavBar(ColoredBox):
 # ── Base Screen ───────────────────────────────────────────────────────────────
 
 class BaseScreen(Screen):
+    """
+    Abstract base class (Inheritance) for all authenticated screens.
+    Provides: content_area layout, go() navigation, logout_and_go_login().
+    Polymorphism: each subclass overrides _build() and on_enter() freely.
+    Encapsulation: layout setup is done once in __init__; subclasses only
+    populate self.content_area.
+    """
     def __init__(self, nav_bar=None, **kw):
         super().__init__(**kw)
         self.nav_bar = nav_bar
@@ -285,12 +302,16 @@ class BaseScreen(Screen):
         app.sm.transition = SlideTransition(duration=0.18)
         app.sm.current = screen_name
         dest = app.sm.get_screen(screen_name)
-        if dest.nav_bar:
+        if hasattr(dest, "nav_bar") and dest.nav_bar:
             dest.nav_bar.highlight(screen_name)
 
     def logout_and_go_login(self):
         logic.logout()
         app = App.get_running_app()
+        # Reset all navbar highlights before going to login
+        for s in app.sm.screens:
+            if hasattr(s, "nav_bar") and s.nav_bar:
+                s.nav_bar.highlight("")
         app.sm.transition = FadeTransition(duration=0.25)
         app.sm.current = "login"
 
@@ -701,6 +722,13 @@ class ExpensesScreen(BaseScreen):
 # ── ADD / EDIT EXPENSE ────────────────────────────────────────────────────────
 
 class AddExpenseScreen(BaseScreen):
+    """
+    Inheritance: extends BaseScreen.
+    Dual-mode screen — handles both Add (self._eid is None) and
+    Edit (self._eid is set via load_expense()) with the same form.
+    Polymorphism: on_enter() rebuilds the form fresh on every navigation.
+    Encapsulation: _eid, _cat_map, and form widgets are private state.
+    """
     def __init__(self, **kw):
         super().__init__(**kw)
         self._eid = None
@@ -769,6 +797,9 @@ class AddExpenseScreen(BaseScreen):
         exp = logic.get_expense(eid)
         if not exp:
             return
+        # Ensure widgets exist before writing to them
+        if not hasattr(self, "_hdr_lbl"):
+            self._build()
         self._hdr_lbl.text = "Edit Expense"
         self.t_title.text  = exp["title"]
         self.t_amount.text = str(exp["amount"])
@@ -801,17 +832,23 @@ class AddExpenseScreen(BaseScreen):
         self._reset(); self.go("expenses")
 
     def _reset(self):
-        self._eid          = None
-        self._hdr_lbl.text = "Add Expense"
-        self.t_title.text  = ""
-        self.t_amount.text = ""
-        self.t_date.text   = logic.today_str()
-        self.t_note.text   = ""
+        """Reset form fields. Only touches widgets that already exist."""
+        self._eid = None
+        if hasattr(self, "_hdr_lbl"):
+            self._hdr_lbl.text = "Add Expense"
+        if hasattr(self, "t_title"):
+            self.t_title.text  = ""
+        if hasattr(self, "t_amount"):
+            self.t_amount.text = ""
+        if hasattr(self, "t_date"):
+            self.t_date.text   = logic.today_str()
+        if hasattr(self, "t_note"):
+            self.t_note.text   = ""
 
     def on_enter(self, *_):
         if not self._eid:
-            self._reset()
-            self._build()
+            self._build()   # build widgets first
+            self._reset()   # then reset their values
 
 
 # ── STATS ─────────────────────────────────────────────────────────────────────
@@ -921,6 +958,10 @@ class StatsScreen(BaseScreen):
 # ── SETTINGS ─────────────────────────────────────────────────────────────────
 
 class SettingsScreen(BaseScreen):
+    """
+    Settings screen — handles budget limits and password changes.
+    Overrides on_enter (polymorphism) so content refreshes on every visit.
+    """
     def __init__(self, **kw):
         super().__init__(**kw)
 
@@ -1001,22 +1042,22 @@ class SettingsScreen(BaseScreen):
         ca.add_widget(scroll)
 
     def _export_csv(self, _):
-        import os
-        from datetime import datetime
+        from datetime import datetime as _dt
         csv_str = logic.export_expenses_csv()
         if not csv_str:
             popup_ok("Error", "No expenses to export.", color="error")
             return
-        # Save next to the app file
         here     = os.path.dirname(os.path.abspath(__file__))
-        filename = f"expenses_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"expenses_{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
         filepath = os.path.join(here, filename)
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
+            with open(filepath, "w", encoding="utf-8", newline="") as f:
                 f.write(csv_str)
-            popup_ok("Exported", f"Saved to:\n{filename}", color="green")
-        except Exception as e:
-            popup_ok("Error", f"Could not save file:\n{e}", color="error")
+            popup_ok("Exported",
+                     f"Saved to:\n{filename}\n\n{csv_str.count(chr(10))-1} rows",
+                     color="green")
+        except OSError as e:
+            popup_ok("Error", f"Could not save:\n{e}", color="error")
 
     def _save_budgets(self, _):
         errors = []
@@ -1289,6 +1330,11 @@ class AdminPanelScreen(BaseScreen):
 # ── APP ───────────────────────────────────────────────────────────────────────
 
 class ExpenseTrackerApp(App):
+    """
+    Inheritance: extends kivy.app.App (framework entry point).
+    Composes all screens and wires ScreenManager.
+    Polymorphism: build() is the Kivy-defined lifecycle method overridden here.
+    """
     def build(self):
         logic.init()
         self.title = "Expense Tracker"

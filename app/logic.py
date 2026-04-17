@@ -1,5 +1,14 @@
 """
-logic.py — Business logic layer for Expense Tracker
+logic.py — Business logic / service layer for Expense Tracker
+
+OOP Design:
+  - Encapsulation : all DB access goes through this module; GUI never
+                    imports database directly. Internal helpers prefixed _.
+  - Polymorphism  : register/login/logout work transparently for both
+                    user and admin roles; callers don't branch on role.
+  - Single Responsibility: date helpers, formatters, validators, auth,
+                    CRUD, export are each in their own named section.
+
 Phase 3 additions:
   - Brute-force login lockout (5 attempts → 30-min cooldown)
   - Audit log for all admin actions
@@ -50,9 +59,9 @@ def _verify_password(plain: str, stored: str) -> bool:
 
 def sanitise(text: str, max_len: int = 200) -> str:
     """
-    Strip leading/trailing whitespace, collapse internal whitespace,
-    remove control characters, and truncate to max_len.
-    Safe to use on all free-text fields before DB write.
+    Encapsulation helper — sanitise all user input before DB writes.
+    Strips whitespace, removes control characters, truncates to max_len.
+    Called internally by add_expense, update_expense, register, add_category.
     """
     if not isinstance(text, str):
         return ""
@@ -177,6 +186,11 @@ def is_logged_in() -> bool:
 
 
 def _uid():
+    """
+    Encapsulation helper — data scoping for DB queries.
+    Returns None for admins (sees all data) or the logged-in user's id.
+    Never called from outside this module (private by convention: _prefix).
+    """
     if current_user is None:
         return None
     return None if is_admin() else current_user["id"]

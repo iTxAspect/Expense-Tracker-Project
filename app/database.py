@@ -1,6 +1,13 @@
 """
 database.py — SQLite persistence layer for Expense Tracker
 Tables: users, categories, expenses, budgets, login_attempts, audit_log
+
+OOP Design:
+  - Encapsulation : all SQL is contained here; no raw SQL leaks to logic.py.
+                    Each function opens, uses, and closes its own connection.
+  - Single Responsibility: each function does exactly one DB operation.
+  - Data Integrity: PRAGMA foreign_keys=ON and WAL mode enforced on every
+                    connection via get_connection().
 """
 
 import sqlite3
@@ -409,22 +416,23 @@ def get_total_by_month(month, year, user_id=None):
 def get_spending_by_category(month=None, year=None, user_id=None):
     conn  = get_connection()
     c     = conn.cursor()
-    query = """
+    # Filters go in the JOIN condition (not WHERE) so categories with
+    # zero matching expenses still appear in the result with total=0.
+    join_cond = "c.id = e.category_id"
+    params    = []
+    if user_id is not None:
+        join_cond += " AND e.user_id=?"; params.append(user_id)
+    if month and year:
+        join_cond += " AND strftime('%m',e.date)=? AND strftime('%Y',e.date)=?"
+        params.extend([f"{month:02d}", str(year)])
+
+    query = f"""
         SELECT c.id, c.name, c.icon, c.color,
                COALESCE(SUM(e.amount),0) AS total
         FROM categories c
-        LEFT JOIN expenses e ON c.id = e.category_id
+        LEFT JOIN expenses e ON {join_cond}
+        GROUP BY c.id ORDER BY total DESC
     """
-    params = []
-    where  = []
-    if user_id is not None:
-        where.append("e.user_id=?"); params.append(user_id)
-    if month and year:
-        where.append("strftime('%m',e.date)=? AND strftime('%Y',e.date)=?")
-        params.extend([f"{month:02d}", str(year)])
-    if where:
-        query += " AND " + " AND ".join(where)
-    query += " GROUP BY c.id ORDER BY total DESC"
     c.execute(query, params)
     rows = c.fetchall()
     conn.close()
