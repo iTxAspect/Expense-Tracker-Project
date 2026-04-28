@@ -1,4 +1,4 @@
 # requirements.txt — runtime dependencies
 # Kivy is listed but NOT auto-installed in CI (too heavy for test runner)
 # Tests run against database.py and logic.py only (no Kivy import needed)
-kivy==2.3.0
+kivy==2.3.1
