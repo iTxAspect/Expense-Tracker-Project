@@ -973,72 +973,110 @@ class SettingsScreen(BaseScreen):
         ca.add_widget(lbl("Settings", size=18, bold=True,
                            size_hint_y=None, height=dp(40)))
 
+        # ── The key fix: use a ScrollView whose child is a BoxLayout
+        # with size_hint_y=None and minimum_height binding.
+        # Every child widget MUST have size_hint_y=None + explicit height.
         scroll = ScrollView(do_scroll_x=False)
-        body   = BoxLayout(orientation="vertical", spacing=dp(10),
-                           size_hint_y=None, padding=[0, dp(4)])
+        body   = BoxLayout(orientation="vertical", spacing=dp(12),
+                           size_hint_y=None, padding=[0, dp(6)])
         body.bind(minimum_height=body.setter("height"))
 
-        # ── Budget section ────────────────────────────────────────────────
+        # ══ SECTION 1: Budget Limits ══════════════════════════════════════
         body.add_widget(lbl("Monthly Budget Limits", size=13, color="subtext",
-                             size_hint_y=None, height=dp(22)))
+                             bold=True, size_hint_y=None, height=dp(26)))
+
         budgets = {b["category_id"]: b["monthly_limit"]
                    for b in logic.get_budgets()}
         self._binps = {}
         for cid, disp in logic.get_category_names():
             cat = logic.get_category_map()[cid]
-            r = card(orientation="horizontal", size_hint_y=None,
-                      height=dp(50), padding=[dp(10), dp(4)], spacing=dp(8))
-            r.add_widget(lbl(f"{cat['icon']}  {cat['name']}",
-                              size=13, color="text"))
-            bi = inp("0.00", filter="float", height=dp(40),
-                      size_hint_x=None, width=dp(100))
+            # Each budget row is a fixed-height horizontal card
+            r = ColoredBox(bg_color=C["card"], radius=dp(10),
+                           orientation="horizontal",
+                           size_hint_y=None, height=dp(52),
+                           padding=[dp(12), dp(6)], spacing=dp(8))
+            name_lbl = Label(
+                text=f"{cat['icon']}  {cat['name']}",
+                font_size=sp(13), color=hex_c("text"),
+                halign="left", valign="middle",
+                size_hint_x=1)
+            name_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+            r.add_widget(name_lbl)
+            bi = inp("0.00", filter="float",
+                     height=dp(40), size_hint_x=None, width=dp(100))
             if cid in budgets:
                 bi.text = str(budgets[cid])
             self._binps[cid] = bi
             r.add_widget(bi)
             body.add_widget(r)
 
-        sb = icon_btn(IC["save"], "Save Budgets", bg=C["accent"],
-                      height=dp(50), size=14)
+        # Save budgets button
+        sb = plain_btn("Save Budget Limits", bg="accent",
+                       height=dp(50), font_size=14)
         sb.bind(on_press=self._save_budgets)
         body.add_widget(sb)
 
-        # ── Change password section ───────────────────────────────────────
-        body.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        # ══ SECTION 2: Change Password ════════════════════════════════════
+        body.add_widget(Widget(size_hint_y=None, height=dp(6)))
         body.add_widget(lbl("Change Password", size=13, color="subtext",
-                             size_hint_y=None, height=dp(22)))
-        pw_card = card(spacing=dp(10), padding=dp(14))
+                             bold=True, size_hint_y=None, height=dp(26)))
+
+        # Password card — fixed total height:
+        # label(18) + inp(48) + label(18) + inp(48) + label(18) + inp(48)
+        # + button(50) + padding(28) + spacing(5×10) = 276
+        PW_CARD_H = dp(310)
+        pw_card = ColoredBox(bg_color=C["card"], radius=dp(12),
+                             orientation="vertical",
+                             size_hint_y=None, height=PW_CARD_H,
+                             padding=[dp(14), dp(12)], spacing=dp(8))
+
         pw_card.add_widget(lbl("Current Password", size=11, color="subtext",
-                                size_hint_y=None, height=dp(16)))
+                                size_hint_y=None, height=dp(18)))
         self.t_old = inp("Current password", password=True)
         pw_card.add_widget(self.t_old)
-        pw_card.add_widget(lbl("New Password", size=11, color="subtext",
-                                size_hint_y=None, height=dp(16)))
-        self.t_new1 = inp("New password (min 6 chars)", password=True)
+
+        pw_card.add_widget(lbl("New Password  (min 6 chars)", size=11,
+                                color="subtext",
+                                size_hint_y=None, height=dp(18)))
+        self.t_new1 = inp("New password", password=True)
         pw_card.add_widget(self.t_new1)
+
         pw_card.add_widget(lbl("Confirm New Password", size=11, color="subtext",
-                                size_hint_y=None, height=dp(16)))
+                                size_hint_y=None, height=dp(18)))
         self.t_new2 = inp("Repeat new password", password=True)
         pw_card.add_widget(self.t_new2)
-        cp_btn = icon_btn(IC["key"], "Change Password", bg=C["accent2"],
-                           height=dp(46), size=14)
+
+        cp_btn = plain_btn("Change Password", bg="accent2",
+                           height=dp(48), font_size=14)
         cp_btn.bind(on_press=self._change_pw)
         pw_card.add_widget(cp_btn)
         body.add_widget(pw_card)
 
-        # ── Phase 4: CSV Export ───────────────────────────────────────────
-        body.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        # ══ SECTION 3: CSV Export ═════════════════════════════════════════
+        body.add_widget(Widget(size_hint_y=None, height=dp(6)))
         body.add_widget(lbl("Data Export", size=13, color="subtext",
-                             size_hint_y=None, height=dp(22)))
-        exp_card = card(spacing=dp(10), padding=dp(14))
-        exp_card.add_widget(lbl(
-            "Export all your expenses to a CSV file you can open in Excel or Google Sheets.",
-            size=12, color="subtext"))
-        csv_btn = plain_btn("Export Expenses as CSV", bg=C["accent"],
+                             bold=True, size_hint_y=None, height=dp(26)))
+
+        EXP_CARD_H = dp(110)
+        exp_card = ColoredBox(bg_color=C["card"], radius=dp(12),
+                              orientation="vertical",
+                              size_hint_y=None, height=EXP_CARD_H,
+                              padding=[dp(14), dp(12)], spacing=dp(10))
+        desc = Label(
+            text="Export your expenses to a CSV file for Excel or Google Sheets.",
+            font_size=sp(12), color=hex_c("subtext"),
+            halign="left", valign="top",
+            size_hint_y=None, height=dp(36))
+        desc.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
+        exp_card.add_widget(desc)
+        csv_btn = plain_btn("Export Expenses as CSV", bg="accent",
                              height=dp(46), font_size=13)
         csv_btn.bind(on_press=self._export_csv)
         exp_card.add_widget(csv_btn)
         body.add_widget(exp_card)
+
+        # Bottom padding so last card isn't flush against nav bar
+        body.add_widget(Widget(size_hint_y=None, height=dp(16)))
 
         scroll.add_widget(body)
         ca.add_widget(scroll)
