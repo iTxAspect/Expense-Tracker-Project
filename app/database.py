@@ -24,9 +24,9 @@ from mysql.connector import IntegrityError, Error as MySQLError
 DB_CONFIG = {
     "host":     "localhost",
     "port":     3306,
-    "user":     "expense_user",
-    "password": "StrongPass123!",
-    "database": "expense_tracker",
+    "user":     "root",
+    "password": "123123",
+    "database": "Expense Tracker",
     "charset":  "utf8mb4",
     "collation":"utf8mb4_unicode_ci",
     "autocommit": False,
