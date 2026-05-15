@@ -52,13 +52,37 @@ IC = {
     "sign_out":"\uf08b", "key":     "\uf084", "crown":   "\uf521",
 }
 
-# ── Colour Palette ────────────────────────────────────────────────────────────
+# ── Colour Palette  (Vibrant Light Theme) ────────────────────────────────────
 C = {
-    "bg":      "#0F1117", "surface": "#1A1D27", "card":    "#22263A",
-    "accent":  "#6C63FF", "accent2": "#FF6584", "green":   "#4ECCA3",
-    "text":    "#EAEAEA", "subtext": "#8892A4", "error":   "#FF5370",
-    "warning": "#FFB347", "white":   "#FFFFFF", "divider": "#2E3250",
-    "admin":   "#FFB347", "user_c":  "#4ECCA3",
+    # backgrounds
+    "bg":      "#F0F4FF",   # soft lavender-white page bg
+    "surface": "#FFFFFF",   # pure white surface
+    "card":    "#FFFFFF",   # card bg
+    "divider": "#E0E7FF",   # soft indigo divider
+
+    # brand accents
+    "accent":  "#5B5BD6",   # deep indigo — primary action
+    "accent2": "#F7487A",   # vivid pink — secondary / danger-ish
+    "green":   "#00B884",   # emerald green — success
+    "warning": "#F59E0B",   # amber — warning
+    "error":   "#EF4444",   # red — error
+    "admin":   "#F59E0B",   # amber — admin badge
+
+    # category bar colours
+    "cat1":    "#5B5BD6",   # indigo
+    "cat2":    "#F7487A",   # pink
+    "cat3":    "#00B884",   # green
+    "cat4":    "#F59E0B",   # amber
+    "cat5":    "#06B6D4",   # cyan
+    "cat6":    "#8B5CF6",   # purple
+    "cat7":    "#EC4899",   # hot pink
+    "cat8":    "#10B981",   # teal
+
+    # text
+    "text":    "#1E1B4B",   # deep indigo text
+    "subtext": "#6B7280",   # gray subtext
+    "white":   "#FFFFFF",
+    "user_c":  "#00B884",
 }
 
 def hex_c(k):
@@ -102,24 +126,35 @@ def inp(hint, password=False, filter=None, multiline=False, height=dp(48), **kw)
         hint_text=hint, password=password,
         input_filter=filter, multiline=multiline,
         size_hint_y=None, height=height, font_size=sp(14),
-        background_color=hex_c("card"), foreground_color=hex_c("text"),
-        hint_text_color=hex_c("subtext"), cursor_color=hex_c("accent"),
-        padding=[dp(12), dp(10)], **kw)
+        background_color=get_color_from_hex("#F0F4FF"),
+        foreground_color=hex_c("text"),
+        hint_text_color=hex_c("subtext"),
+        cursor_color=hex_c("accent"),
+        padding=[dp(14), dp(12)], **kw)
 
 
-def plain_btn(text, bg="accent", fg="white", height=dp(48),
+def plain_btn(text, bg="accent", fg="white", height=dp(50),
               font_size=14, on_press=None, **kw):
     b = Button(text=text, font_size=sp(font_size),
                color=hex_c(fg), background_normal="",
-               background_color=hex_c(bg),
-               size_hint_y=None, height=height, **kw)
+               background_color=(0, 0, 0, 0),
+               size_hint_y=None, height=height,
+               bold=True, **kw)
+    bg_hex = C[bg] if bg in C else bg
+    def _draw(btn, *_):
+        btn.canvas.before.clear()
+        with btn.canvas.before:
+            Color(*get_color_from_hex(bg_hex))
+            RoundedRectangle(pos=btn.pos, size=btn.size,
+                             radius=[dp(height / 2)])
+    b.bind(pos=_draw, size=_draw)
     if on_press:
         b.bind(on_press=on_press)
     return b
 
 
 def card(orientation="vertical", padding=dp(14), spacing=dp(8), **kw):
-    return ColoredBox(bg_color=C["card"], radius=dp(12),
+    return ColoredBox(bg_color=C["card"], radius=dp(16),
                       orientation=orientation, padding=padding,
                       spacing=spacing, **kw)
 
@@ -154,12 +189,14 @@ def icon_btn(codepoint, label_text, bg, size=15, height=dp(48),
 def popup_ok(title, message, color="text"):
     content = BoxLayout(orientation="vertical", padding=dp(16), spacing=dp(12))
     content.add_widget(lbl(message, size=13, color=color, halign="center"))
-    ok = plain_btn("OK", bg="green", fg="bg", height=dp(44))
+    bg_key  = "error" if color == "error" else "accent"
+    ok = plain_btn("OK  ✓", bg=bg_key, fg="white", height=dp(46))
     content.add_widget(ok)
     p = Popup(title=title, content=content,
               size_hint=(0.85, None), height=dp(210),
               background_color=hex_c("surface"),
-              title_color=hex_c("text"), separator_color=hex_c("accent"))
+              title_color=hex_c("accent"),
+              separator_color=hex_c("accent"))
     ok.bind(on_press=p.dismiss)
     p.open()
 
@@ -183,13 +220,13 @@ def popup_confirm(title, message, on_yes):
 
 
 def role_badge(role):
-    color = C["admin"] if role == "admin" else C["user_c"]
+    color = C["warning"] if role == "admin" else C["cat5"]
     text  = "ADMIN" if role == "admin" else "USER"
-    box   = ColoredBox(bg_color=color, radius=dp(6),
-                       size_hint=(None, None), size=(dp(54), dp(20)),
+    box   = ColoredBox(bg_color=color, radius=dp(10),
+                       size_hint=(None, None), size=(dp(54), dp(22)),
                        padding=[dp(4), 0])
     box.add_widget(Label(text=text, font_size=sp(9), bold=True,
-                          color=hex_c("bg"), halign="center",
+                          color=(1,1,1,1), halign="center",
                           valign="middle"))
     return box
 
@@ -231,7 +268,7 @@ class NavBar(ColoredBox):
 
     def __init__(self, sm, **kw):
         super().__init__(bg_color=C["surface"], orientation="horizontal",
-                         size_hint_y=None, height=dp(62),
+                         size_hint_y=None, height=dp(68),
                          padding=[0, 0], spacing=0, **kw)
         self.sm = sm
         self._tabs = {}
@@ -242,18 +279,19 @@ class NavBar(ColoredBox):
         self.clear_widgets()
         self._tabs = {}
         for cp, label_text, screen_name in tabs:
-            col = BoxLayout(orientation="vertical", spacing=0, padding=[0, dp(4)])
+            col = BoxLayout(orientation="vertical", spacing=0,
+                            padding=[0, dp(6)])
             ic_btn = Button(
                 text=cp if _FA_OK else label_text[0],
                 font_name="FontAwesome" if _FA_OK else "Roboto",
-                font_size=sp(20), color=hex_c("subtext"),
+                font_size=sp(22), color=hex_c("subtext"),
                 background_normal="", background_color=(0, 0, 0, 0),
-                size_hint_y=None, height=dp(30),
+                size_hint_y=None, height=dp(28),
                 halign="center", valign="middle")
             ic_btn.bind(size=lambda w, s: setattr(w, "text_size", s))
             ic_btn.bind(on_press=lambda _, sn=screen_name: self._go(sn))
-            tx = Label(text=label_text, font_size=sp(9),
-                       color=hex_c("subtext"), size_hint_y=None, height=dp(14),
+            tx = Label(text=label_text, font_size=sp(9), bold=True,
+                       color=hex_c("subtext"), size_hint_y=None, height=dp(13),
                        halign="center", valign="middle")
             tx.bind(size=lambda w, s: setattr(w, "text_size", s))
             col.add_widget(ic_btn); col.add_widget(tx)
@@ -273,8 +311,14 @@ class NavBar(ColoredBox):
 
     def highlight(self, sn):
         for name, (ib, tx) in self._tabs.items():
-            c = hex_c("accent") if name == sn else hex_c("subtext")
-            ib.color = c; tx.color = c
+            active = name == sn
+            c = hex_c("accent") if active else hex_c("subtext")
+            ib.color = c
+            tx.color = c
+            if active:
+                tx.bold = True
+            else:
+                tx.bold = False
 
 
 # ── Base Screen ───────────────────────────────────────────────────────────────
@@ -293,7 +337,7 @@ class BaseScreen(Screen):
         root = ColoredBox(bg_color=C["bg"], orientation="vertical",
                           padding=0, spacing=0)
         self.content_area = BoxLayout(orientation="vertical",
-                                      padding=[dp(14), dp(10)], spacing=dp(10))
+                                      padding=[dp(16), dp(12)], spacing=dp(12))
         root.add_widget(self.content_area)
         if nav_bar:
             root.add_widget(nav_bar)
@@ -330,21 +374,29 @@ class LoginScreen(Screen):
         root = ColoredBox(bg_color=C["bg"], orientation="vertical",
                           padding=0, spacing=0)
 
-        # Scrollable centre column
         scroll = ScrollView(do_scroll_x=False)
         inner  = BoxLayout(orientation="vertical",
                            size_hint_y=None, spacing=dp(18),
-                           padding=[dp(28), dp(60), dp(28), dp(30)])
+                           padding=[dp(24), dp(50), dp(24), dp(30)])
         inner.bind(minimum_height=inner.setter("height"))
 
-        # Title
-        inner.add_widget(lbl("Expense Tracker", size=28, bold=True,
-                               color="accent", halign="center",
-                               size_hint_y=None, height=dp(44)))
-        inner.add_widget(lbl("Sign in to continue", size=13,
+        # Title hero block
+        hero = ColoredBox(bg_color=C["accent"], radius=dp(20),
+                          orientation="vertical",
+                          size_hint_y=None, height=dp(120),
+                          padding=[dp(20), dp(20)], spacing=dp(6))
+        hero.add_widget(lbl("💰 Expense", size=30, bold=True,
+                              color="white", halign="center",
+                              size_hint_y=None, height=dp(40)))
+        hero.add_widget(lbl("Tracker", size=30, bold=True,
+                              color="white", halign="center",
+                              size_hint_y=None, height=dp(38)))
+        inner.add_widget(hero)
+        inner.add_widget(Widget(size_hint_y=None, height=dp(6)))
+        inner.add_widget(lbl("Sign in to your account", size=13,
                                color="subtext", halign="center",
                                size_hint_y=None, height=dp(22)))
-        inner.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        inner.add_widget(Widget(size_hint_y=None, height=dp(6)))
 
         # Fields
         inner.add_widget(lbl("Username", size=11, color="subtext",
@@ -427,13 +479,18 @@ class RegisterScreen(Screen):
                            padding=[dp(28), dp(50), dp(28), dp(30)])
         inner.bind(minimum_height=inner.setter("height"))
 
-        inner.add_widget(lbl("Create Account", size=26, bold=True,
-                               color="accent", halign="center",
-                               size_hint_y=None, height=dp(40)))
-        inner.add_widget(lbl("Join Expense Tracker", size=12,
-                               color="subtext", halign="center",
-                               size_hint_y=None, height=dp(22)))
-        inner.add_widget(Widget(size_hint_y=None, height=dp(10)))
+        hero = ColoredBox(bg_color=C["green"], radius=dp(20),
+                         orientation="vertical",
+                         size_hint_y=None, height=dp(90),
+                         padding=[dp(20), dp(16)], spacing=dp(4))
+        hero.add_widget(lbl("Create Account", size=24, bold=True,
+                              color="white", halign="center",
+                              size_hint_y=None, height=dp(36)))
+        hero.add_widget(lbl("Join Expense Tracker", size=12,
+                              color="white", halign="center",
+                              size_hint_y=None, height=dp(22)))
+        inner.add_widget(hero)
+        inner.add_widget(Widget(size_hint_y=None, height=dp(8)))
 
         inner.add_widget(lbl("Username  (min 3 characters)", size=11,
                                color="subtext", size_hint_y=None, height=dp(18)))
@@ -506,31 +563,45 @@ class DashboardScreen(BaseScreen):
         ca.clear_widgets()
         user = logic.get_current_user()
 
-        # Header
-        hdr = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(8))
+        # Header — coloured strip
+        hdr_bg = C["accent"] if not logic.is_admin() else C["warning"]
+        hdr = ColoredBox(bg_color=hdr_bg, radius=dp(16),
+                         orientation="horizontal",
+                         size_hint_y=None, height=dp(64),
+                         padding=[dp(16), dp(10)], spacing=dp(8))
         left = BoxLayout(orientation="vertical", spacing=dp(2))
-        left.add_widget(lbl("ExpenseTracker", size=20, bold=True))
+        left.add_widget(lbl("💰 ExpenseTracker", size=18, bold=True,
+                              color="white"))
         if user:
-            role_text = f"Admin Dashboard" if logic.is_admin() else f"Hi, {user['username']}"
-            rc = "admin" if logic.is_admin() else "green"
-            left.add_widget(lbl(role_text, size=11, color=rc))
+            role_text = "Admin Dashboard" if logic.is_admin() else f"Hi, {user['username']} 👋"
+            left.add_widget(lbl(role_text, size=11, color="white"))
         hdr.add_widget(left)
         hdr.add_widget(Widget())
-        logout_b = plain_btn("Logout", bg="error", fg="white",
-                              height=dp(34), font_size=11,
-                              size_hint_x=None, width=dp(72))
+        logout_b = Button(text="Logout", font_size=sp(11),
+                          color=hex_c(hdr_bg), background_normal="",
+                          background_color=(0,0,0,0),
+                          size_hint=(None, None),
+                          size=(dp(72), dp(34)), bold=True)
+        def _draw_lo(btn, *_):
+            btn.canvas.before.clear()
+            with btn.canvas.before:
+                Color(1, 1, 1, 1)
+                RoundedRectangle(pos=btn.pos, size=btn.size, radius=[dp(17)])
+        logout_b.bind(pos=_draw_lo, size=_draw_lo)
         logout_b.bind(on_press=lambda _: self.logout_and_go_login())
         hdr.add_widget(logout_b)
         ca.add_widget(hdr)
 
         # Month nav
-        nav = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-        bp = icon_btn(IC["left"],  "", bg=C["card"], height=dp(38),
-                      size_hint_x=None, width=dp(44))
-        bn = icon_btn(IC["right"], "", bg=C["card"], height=dp(38),
-                      size_hint_x=None, width=dp(44))
+        nav = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8))
+        bp = plain_btn("◀", bg="divider", fg="accent",
+                        height=dp(42), font_size=14,
+                        size_hint_x=None, width=dp(48))
+        bn = plain_btn("▶", bg="divider", fg="accent",
+                        height=dp(42), font_size=14,
+                        size_hint_x=None, width=dp(48))
         self._ml = lbl(logic.month_year_label(self.month, self.year),
-                       size=15, bold=True, halign="center")
+                       size=15, bold=True, halign="center", color="text")
         bp.bind(on_press=self._prev); bn.bind(on_press=self._next)
         nav.add_widget(bp); nav.add_widget(self._ml); nav.add_widget(bn)
         ca.add_widget(nav)
@@ -540,14 +611,20 @@ class DashboardScreen(BaseScreen):
             stats = logic.get_admin_stats()
             total_users = len(stats)
             grand_total = sum(s["total_spent"] for s in stats)
-            banner = card(size_hint_y=None, height=dp(56), orientation="horizontal",
-                          spacing=dp(8))
-            banner.add_widget(
-                lbl(f"Users: {total_users}", size=13, color="admin",
-                    bold=True, halign="center"))
-            banner.add_widget(
-                lbl(f"All Spending: {logic.format_currency(grand_total)}",
-                    size=13, color="accent", bold=True, halign="center"))
+            banner = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(8))
+            b1 = ColoredBox(bg_color=C["cat4"], radius=dp(14),
+                             orientation="vertical", padding=[dp(12), dp(6)])
+            b1.add_widget(lbl(f"{total_users}", size=22, bold=True,
+                               color="white", halign="center"))
+            b1.add_widget(lbl("Total Users", size=10, color="white",
+                               halign="center"))
+            b2 = ColoredBox(bg_color=C["cat1"], radius=dp(14),
+                             orientation="vertical", padding=[dp(12), dp(6)])
+            b2.add_widget(lbl(logic.format_currency(grand_total),
+                               size=18, bold=True, color="white", halign="center"))
+            b2.add_widget(lbl("All Spending", size=10, color="white",
+                               halign="center"))
+            banner.add_widget(b1); banner.add_widget(b2)
             ca.add_widget(banner)
 
         scroll = ScrollView(do_scroll_x=False)
@@ -561,41 +638,64 @@ class DashboardScreen(BaseScreen):
     def _fill(self, body):
         data = logic.get_dashboard_data(self.month, self.year)
 
-        tc = card(size_hint_y=None, height=dp(86))
-        tc.add_widget(lbl("Total Spending", size=12, color="subtext"))
-        tc.add_widget(lbl(data["total_display"], size=30,
-                           color="accent", bold=True))
+        tc = ColoredBox(bg_color=C["accent"], radius=dp(20),
+                        orientation="vertical",
+                        size_hint_y=None, height=dp(96),
+                        padding=[dp(20), dp(14)], spacing=dp(4))
+        tc.add_widget(lbl("Total Spending  " + data["month_label"],
+                           size=12, color="white"))
+        tc.add_widget(lbl(data["total_display"], size=34,
+                           color="white", bold=True))
         body.add_widget(tc)
 
-        body.add_widget(lbl("By Category", size=12, color="subtext",
-                              size_hint_y=None, height=dp(22)))
+        sec2 = ColoredBox(bg_color=C["cat3"], radius=dp(10),
+                          size_hint_y=None, height=dp(28),
+                          padding=[dp(12), 0])
+        sec2.add_widget(lbl("By Category", size=12, bold=True, color="white"))
+        body.add_widget(sec2)
         for cat in data["by_category"]:
             if cat["total"] == 0:
                 continue
-            c = card(size_hint_y=None, height=dp(68), orientation="vertical",
-                      spacing=dp(4))
-            row = BoxLayout(size_hint_y=None, height=dp(22))
-            row.add_widget(lbl(f"{cat['icon']}  {cat['name']}",
-                                size=13, color="text"))
+            c = ColoredBox(bg_color=C["surface"], radius=dp(16),
+                           orientation="vertical",
+                           size_hint_y=None, height=dp(72),
+                           padding=[dp(14), dp(8)], spacing=dp(4))
+            row = BoxLayout(size_hint_y=None, height=dp(24))
+            # Coloured dot indicator
+            dot_col = C[["cat1","cat2","cat3","cat4","cat5","cat6","cat7","cat8"][
+                list(data["by_category"]).index(cat) % 8]]
+            dot = ColoredBox(bg_color=dot_col, radius=dp(6),
+                             size_hint=(None, None), size=(dp(12), dp(12)),
+                             padding=0)
+            row.add_widget(dot)
+            row.add_widget(Widget(size_hint_x=None, width=dp(6)))
+            row.add_widget(lbl(f"{cat['name']}", size=13, color="text"))
             row.add_widget(lbl(cat["total_display"], size=13,
-                                color="accent2", halign="right"))
+                                color="accent", bold=True, halign="right"))
             c.add_widget(row)
+            cat_colors = ["cat1","cat2","cat3","cat4","cat5","cat6","cat7","cat8"]
+            ci = list(data["by_category"]).index(cat) % len(cat_colors)
+            cat_col = C[cat_colors[ci]]
             if cat.get("budget_pct") is not None:
-                bar_bg = ColoredBox(bg_color=C["divider"], radius=dp(4),
-                                    size_hint_y=None, height=dp(8))
-                fc = C["error"] if cat["over_budget"] else C["green"]
+                bar_bg = ColoredBox(bg_color=C["divider"], radius=dp(6),
+                                    size_hint_y=None, height=dp(10))
+                fc = C["error"] if cat["over_budget"] else cat_col
                 bar_bg.add_widget(
-                    ColoredBox(bg_color=fc, radius=dp(4),
+                    ColoredBox(bg_color=fc, radius=dp(6),
                                size_hint=(cat["budget_pct"]/100, 1)))
                 c.add_widget(bar_bg)
-                sfx = "  Over budget!" if cat["over_budget"] else ""
+                sfx = "  ⚠ Over budget!" if cat["over_budget"] else ""
                 c.add_widget(lbl(
                     f"Budget: {logic.format_currency(cat['budget_limit'])}" + sfx,
                     size=10, color="subtext", size_hint_y=None, height=dp(14)))
             body.add_widget(c)
 
-        body.add_widget(lbl("Recent Expenses", size=12, color="subtext",
-                              size_hint_y=None, height=dp(22)))
+        sec = ColoredBox(bg_color=C["cat2"], radius=dp(10),
+                         size_hint_y=None, height=dp(28),
+                         padding=[dp(12), 0])
+        sec.add_widget(lbl("Recent Expenses", size=12, bold=True,
+                             color="white"))
+        body.add_widget(sec)
         if not data["recent"]:
             body.add_widget(lbl("No expenses yet.", size=13, color="subtext",
                                  halign="center", size_hint_y=None, height=dp(40)))
@@ -603,20 +703,27 @@ class DashboardScreen(BaseScreen):
             self._exp_row(body, exp)
 
     def _exp_row(self, parent, exp):
-        r = card(orientation="horizontal", size_hint_y=None, height=dp(54),
-                  padding=[dp(10), dp(6)], spacing=dp(8))
-        r.add_widget(lbl(exp.get("category_icon", "?"), size=20,
-                          size_hint_x=None, width=dp(28)))
+        r = ColoredBox(bg_color=C["surface"], radius=dp(16),
+                        orientation="horizontal", size_hint_y=None, height=dp(58),
+                        padding=[dp(14), dp(8)], spacing=dp(10))
+        # Coloured icon circle
+        icon_colors = ["cat1","cat2","cat3","cat4","cat5","cat6","cat7","cat8"]
+        ic = ColoredBox(bg_color=C[icon_colors[hash(exp.get("category_name",""))%8]],
+                        radius=dp(20), size_hint=(None,None), size=(dp(40),dp(40)),
+                        padding=[dp(4),dp(4)])
+        ic.add_widget(lbl(exp.get("category_icon","?"), size=16,
+                           color="white", halign="center", bold=True))
+        r.add_widget(ic)
         info = BoxLayout(orientation="vertical", spacing=dp(2))
-        info.add_widget(lbl(exp["title"], size=13, bold=True))
+        info.add_widget(lbl(exp["title"], size=13, bold=True, color="text"))
         sub = exp["date_display"]
         if logic.is_admin() and exp.get("owner"):
             sub += f"  •  {exp['owner']}"
         info.add_widget(lbl(sub, size=11, color="subtext"))
         r.add_widget(info)
-        r.add_widget(lbl(exp["amount_display"], size=13, color="accent2",
+        r.add_widget(lbl(exp["amount_display"], size=14, color="accent",
                           bold=True, halign="right",
-                          size_hint_x=None, width=dp(80)))
+                          size_hint_x=None, width=dp(85)))
         parent.add_widget(r)
 
     def _prev(self, _):
@@ -640,11 +747,15 @@ class ExpensesScreen(BaseScreen):
         ca = self.content_area
         ca.clear_widgets()
 
-        hdr = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-        hdr.add_widget(lbl("All Expenses", size=18, bold=True))
+        hdr = ColoredBox(bg_color=C["accent2"], radius=dp(16),
+                         orientation="horizontal",
+                         size_hint_y=None, height=dp(60),
+                         padding=[dp(16), dp(10)], spacing=dp(8))
+        hdr.add_widget(lbl("📋 All Expenses", size=17, bold=True, color="white"))
         hdr.add_widget(Widget())
-        ab = icon_btn(IC["plus"], "Add", bg=C["accent"],
-                      height=dp(36), size_hint_x=None, width=dp(88))
+        ab = plain_btn("+ Add", bg="white", fg="accent2",
+                       height=dp(36), font_size=12,
+                       size_hint_x=None, width=dp(76))
         ab.bind(on_press=lambda _: self.go("add_expense"))
         hdr.add_widget(ab)
         ca.add_widget(hdr)
@@ -739,8 +850,11 @@ class AddExpenseScreen(BaseScreen):
         ca = self.content_area
         ca.clear_widgets()
 
-        hdr = BoxLayout(size_hint_y=None, height=dp(40))
-        self._hdr_lbl = lbl("Add Expense", size=18, bold=True)
+        hdr = ColoredBox(bg_color=C["green"], radius=dp(16),
+                         orientation="horizontal",
+                         size_hint_y=None, height=dp(58),
+                         padding=[dp(16), dp(10)])
+        self._hdr_lbl = lbl("➕  Add Expense", size=17, bold=True, color="white")
         hdr.add_widget(self._hdr_lbl)
         ca.add_widget(hdr)
 
@@ -864,8 +978,12 @@ class StatsScreen(BaseScreen):
     def _build(self):
         ca = self.content_area
         ca.clear_widgets()
-        ca.add_widget(lbl("Statistics", size=18, bold=True,
-                           size_hint_y=None, height=dp(40)))
+        sh = ColoredBox(bg_color=C["cat5"], radius=dp(16),
+                        orientation="horizontal",
+                        size_hint_y=None, height=dp(58),
+                        padding=[dp(16), dp(10)])
+        sh.add_widget(lbl("📊  Statistics", size=17, bold=True, color="white"))
+        ca.add_widget(sh)
 
         nav = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
         bp  = icon_btn(IC["left"],  "", bg=C["card"], height=dp(38),
@@ -888,10 +1006,14 @@ class StatsScreen(BaseScreen):
 
     def _fill(self, body):
         data = logic.get_dashboard_data(self.month, self.year)
-        tc = card(size_hint_y=None, height=dp(80))
-        tc.add_widget(lbl("Monthly Total", size=12, color="subtext"))
-        tc.add_widget(lbl(data["total_display"], size=28,
-                           color="accent", bold=True))
+        tc = ColoredBox(bg_color=C["cat5"], radius=dp(20),
+                        orientation="vertical",
+                        size_hint_y=None, height=dp(96),
+                        padding=[dp(20), dp(14)], spacing=dp(4))
+        tc.add_widget(lbl("Monthly Total  " + data["month_label"],
+                           size=12, color="white"))
+        tc.add_widget(lbl(data["total_display"], size=34,
+                           color="white", bold=True))
         body.add_widget(tc)
 
         # Admin: per-user breakdown
@@ -919,19 +1041,25 @@ class StatsScreen(BaseScreen):
             if cat["total"] == 0:
                 continue
             pct = cat["total"] / mx
-            r = ColoredBox(bg_color=C["card"], radius=dp(10),
+            cat_colors = ["cat1","cat2","cat3","cat4","cat5","cat6","cat7","cat8"]
+            ci  = list(data["by_category"]).index(cat) % len(cat_colors)
+            cc  = C[cat_colors[ci]]
+            r = ColoredBox(bg_color=C["surface"], radius=dp(16),
                            orientation="vertical", size_hint_y=None,
-                           height=dp(56), padding=[dp(10), dp(6)], spacing=dp(4))
-            top = BoxLayout(size_hint_y=None, height=dp(20))
-            top.add_widget(lbl(f"{cat['icon']}  {cat['name']}",
-                                size=12, color="text"))
+                           height=dp(62), padding=[dp(14), dp(8)], spacing=dp(4))
+            top = BoxLayout(size_hint_y=None, height=dp(22))
+            dot = ColoredBox(bg_color=cc, radius=dp(6),
+                             size_hint=(None,None), size=(dp(12),dp(12)), padding=0)
+            top.add_widget(dot)
+            top.add_widget(Widget(size_hint_x=None, width=dp(6)))
+            top.add_widget(lbl(cat["name"], size=12, color="text"))
             top.add_widget(lbl(cat["total_display"], size=12,
-                                color="accent2", halign="right"))
+                                color="text", bold=True, halign="right"))
             r.add_widget(top)
-            bar = ColoredBox(bg_color=C["divider"], radius=dp(4),
+            bar = ColoredBox(bg_color=C["divider"], radius=dp(6),
                              size_hint_y=None, height=dp(10))
-            bar.add_widget(ColoredBox(bg_color=cat.get("color", C["accent"]),
-                                       radius=dp(4), size_hint=(pct, 1)))
+            bar.add_widget(ColoredBox(bg_color=cc, radius=dp(6),
+                                       size_hint=(pct, 1)))
             r.add_widget(bar)
             body.add_widget(r)
 
@@ -970,8 +1098,12 @@ class SettingsScreen(BaseScreen):
     def _build(self):
         ca = self.content_area
         ca.clear_widgets()
-        ca.add_widget(lbl("Settings", size=18, bold=True,
-                           size_hint_y=None, height=dp(40)))
+        sh = ColoredBox(bg_color=C["cat6"], radius=dp(16),
+                        orientation="horizontal",
+                        size_hint_y=None, height=dp(58),
+                        padding=[dp(16), dp(10)])
+        sh.add_widget(lbl("⚙️  Settings", size=17, bold=True, color="white"))
+        ca.add_widget(sh)
 
         # ── The key fix: use a ScrollView whose child is a BoxLayout
         # with size_hint_y=None and minimum_height binding.
@@ -1138,11 +1270,14 @@ class AdminPanelScreen(BaseScreen):
         ca.clear_widgets()
 
         # ── Header ────────────────────────────────────────────────────────
-        hdr = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-        hdr.add_widget(lbl("Admin Panel", size=18, bold=True, color="admin"))
+        hdr = ColoredBox(bg_color=C["warning"], radius=dp(16),
+                         orientation="horizontal",
+                         size_hint_y=None, height=dp(62),
+                         padding=[dp(16), dp(10)], spacing=dp(8))
+        hdr.add_widget(lbl("👑  Admin Panel", size=17, bold=True, color="white"))
         hdr.add_widget(Widget())
-        add_b = plain_btn("+ Add User", bg=C["admin"], fg="bg",
-                           height=dp(34), font_size=11,
+        add_b = plain_btn("+ Add User", bg="white", fg="warning",
+                           height=dp(36), font_size=11,
                            size_hint_x=None, width=dp(90))
         add_b.bind(on_press=self._show_add_user)
         hdr.add_widget(add_b)

@@ -22,23 +22,49 @@ from mysql.connector import IntegrityError, Error as MySQLError
 
 # ── Connection config — edit these to match your MySQL server ─────────────────
 DB_CONFIG = {
-    "host":     "localhost",
-    "port":     3306,
-    "user":     "root",
-    "password": "123123",
-    "database": "Expense Tracker",
-    "charset":  "utf8mb4",
-    "collation":"utf8mb4_unicode_ci",
+    "host":       "localhost",
+    "port":       3306,
+    "user":       "root",           # change to your MySQL username
+    "password":   "123123",               # change to your MySQL password
+    "database":   "expense_tracker",
+    "charset":    "utf8mb4",
     "autocommit": False,
-    "time_zone": "+00:00",
 }
+
+# Config WITHOUT database — used only during init_db() to create the DB
+_DB_CONFIG_NO_DB = {
+    "host":       DB_CONFIG["host"],
+    "port":       DB_CONFIG["port"],
+    "user":       DB_CONFIG["user"],
+    "password":   DB_CONFIG["password"],
+    "charset":    DB_CONFIG["charset"],
+    "autocommit": False,
+}
+
+DB_NAME = DB_CONFIG["database"]
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
+def _ensure_database_exists():
+    """
+    Connect without selecting a database and create expense_tracker if missing.
+    Called once at startup before any other connection.
+    """
+    conn = mysql.connector.connect(**_DB_CONFIG_NO_DB)
+    c    = conn.cursor()
+    c.execute(
+        f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` "
+        f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    )
+    conn.commit()
+    c.close()
+    conn.close()
+
+
 def get_connection():
     """
-    Open and return a new MySQL connection.
+    Open and return a new MySQL connection to expense_tracker.
     Each function is responsible for closing it when done.
     """
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -62,8 +88,8 @@ def _rows_to_dicts(cursor, rows):
 
 def init_db():
     """
-    Create all tables if they do not exist.
-    Safe to call on every app startup — uses IF NOT EXISTS.
+    Create the database (if it does not exist) then create all tables.
+    Safe to call on every app startup — uses IF NOT EXISTS throughout.
     MySQL differences from SQLite:
       - AUTO_INCREMENT instead of AUTOINCREMENT
       - TINYINT(1) instead of INTEGER for booleans
@@ -72,6 +98,7 @@ def init_db():
       - ON DUPLICATE KEY UPDATE instead of ON CONFLICT
       - DOUBLE instead of REAL
     """
+    _ensure_database_exists()   # creates DB if missing — no manual SQL needed
     conn = get_connection()
     c    = conn.cursor()
 
