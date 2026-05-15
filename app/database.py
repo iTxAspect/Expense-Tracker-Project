@@ -71,17 +71,31 @@ def get_connection():
     return conn
 
 
+def _normalise(val):
+    """
+    MySQL returns DATE/DATETIME columns as Python date/datetime objects.
+    Convert them to ISO strings so the rest of the app (which expects strings)
+    works correctly without changes.
+    """
+    from datetime import date as date_type, datetime as datetime_type
+    if isinstance(val, datetime_type):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(val, date_type):
+        return val.strftime("%Y-%m-%d")
+    return val
+
+
 def _row_to_dict(cursor, row):
-    """Convert a cursor row to a dict using column names."""
+    """Convert a cursor row to a dict using column names. Normalises date types."""
     if row is None:
         return None
     cols = [d[0] for d in cursor.description]
-    return dict(zip(cols, row))
+    return {k: _normalise(v) for k, v in zip(cols, row)}
 
 
 def _rows_to_dicts(cursor, rows):
     cols = [d[0] for d in cursor.description]
-    return [dict(zip(cols, r)) for r in rows]
+    return [{k: _normalise(v) for k, v in zip(cols, row)} for row in rows]
 
 
 # ── Schema Init ───────────────────────────────────────────────────────────────

@@ -227,9 +227,20 @@ def parse_date(date_str: str):
         return None
 
 
-def format_date_display(date_str: str) -> str:
+def format_date_display(date_str) -> str:
+    """
+    Format a date for display. Accepts:
+    - str in 'YYYY-MM-DD' format (SQLite)
+    - datetime.date object (MySQL returns DATE columns as date objects)
+    - datetime.datetime object
+    """
+    from datetime import date as date_type, datetime as datetime_type
+    # Already a date/datetime object (MySQL behaviour)
+    if isinstance(date_str, (date_type, datetime_type)):
+        return date_str.strftime("%b %d, %Y")
+    # String path
     d = parse_date(date_str)
-    return d.strftime("%b %d, %Y") if d else date_str
+    return d.strftime("%b %d, %Y") if d else str(date_str)
 
 
 def month_year_label(month: int, year: int) -> str:
@@ -254,6 +265,11 @@ def format_currency(amount, symbol="$") -> str:
 
 
 def format_expense_row(expense: dict) -> dict:
+    from datetime import date as date_type, datetime as datetime_type
+    # MySQL returns DATE as datetime.date — convert to string for consistency
+    raw_date = expense.get("date", "")
+    if isinstance(raw_date, (date_type, datetime_type)):
+        expense["date"] = raw_date.strftime("%Y-%m-%d")
     expense["amount_display"] = format_currency(expense.get("amount", 0))
     expense["date_display"]   = format_date_display(expense.get("date", ""))
     expense["owner"]          = expense.get("username", "")
